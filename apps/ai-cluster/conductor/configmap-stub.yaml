@@ -593,9 +593,9 @@ data:
         namespaces = list({v.get("namespace", "mtv-migrated") for v in vms})
         sched_name = f"ztp-backup-{int(time.time())}"
         _k8s_create(base,
-            "/apis/velero.io/v1/namespaces/openshift-adp/schedules",
+            "/apis/velero.io/v1/namespaces/oadp-user1/schedules",
             {"apiVersion": "velero.io/v1", "kind": "Schedule",
-             "metadata": {"name": sched_name, "namespace": "openshift-adp",
+             "metadata": {"name": sched_name, "namespace": "oadp-user1",
                           "labels": {"ztp-modernization-factory": "true"}},
              "spec": {"schedule": schedule,
                       "template": {

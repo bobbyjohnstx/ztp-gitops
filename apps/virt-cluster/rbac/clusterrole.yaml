@@ -27,5 +27,5 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch"]
   # OCP Virt instance types
   - apiGroups: ["instancetype.kubevirt.io"]
-    resources: ["virtualmachineinstancetypes", "virtualmachineinstancepreferences"]
+    resources: ["virtualmachineinstancetypes", "virtualmachinepreferences", "virtualmachineclusterinstancetypes", "virtualmachineclusterpreferences"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
