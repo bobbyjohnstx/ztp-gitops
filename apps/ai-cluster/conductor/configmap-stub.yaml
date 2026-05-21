@@ -29,6 +29,9 @@ data:
     CLUSTER1_API_URL     = os.environ.get("CLUSTER1_API_URL", "").rstrip("/")
     CLUSTER1_TOKEN       = os.environ.get("CLUSTER1_TOKEN", "")
     MTV_NS               = "openshift-mtv"
+    LANGFUSE_URL         = os.environ.get("LANGFUSE_URL", "").rstrip("/")
+    LANGFUSE_PK          = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
+    LANGFUSE_SK          = os.environ.get("LANGFUSE_SECRET_KEY", "")
 
 
     # ── HTTP helpers ──────────────────────────────────────────────────────────
@@ -416,6 +419,79 @@ data:
         }
 
 
+    # ── Langfuse tracing helpers ─────────────────────────────────────────────
+
+    def _langfuse_ingest(events):
+        if not LANGFUSE_URL or not LANGFUSE_PK or not LANGFUSE_SK:
+            return
+        creds = base64.b64encode(f"{LANGFUSE_PK}:{LANGFUSE_SK}".encode()).decode()
+        try:
+            _json_req(
+                LANGFUSE_URL + "/api/public/ingestion",
+                payload={"batch": events},
+                headers={"Authorization": f"Basic {creds}"},
+            )
+        except Exception:
+            pass
+
+    def _trace_skill(skill_name, inputs, func, *args, **kwargs):
+        import uuid
+        trace_id = str(uuid.uuid4())
+        span_id  = str(uuid.uuid4())
+        t0 = time.time()
+        start_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0))
+        error = None
+        result = None
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception as e:
+            error = str(e)
+            raise
+        finally:
+            t1 = time.time()
+            end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t1))
+            duration_ms = round((t1 - t0) * 1000)
+            status = result.get("status", "unknown") if isinstance(result, dict) else "error"
+            events = [
+                {"type": "trace-create", "id": str(uuid.uuid4()),
+                 "timestamp": start_iso,
+                 "body": {
+                     "id": trace_id, "name": skill_name,
+                     "input": inputs, "output": result,
+                     "metadata": {"duration_ms": duration_ms,
+                                  "status": status,
+                                  "error": error},
+                 }},
+                {"type": "span-create", "id": str(uuid.uuid4()),
+                 "timestamp": start_iso,
+                 "body": {
+                     "traceId": trace_id, "id": span_id,
+                     "name": skill_name,
+                     "startTime": start_iso, "endTime": end_iso,
+                     "input": inputs, "output": result,
+                     "metadata": {"duration_ms": duration_ms},
+                     "level": "ERROR" if error else "DEFAULT",
+                     "statusMessage": error or "ok",
+                 }},
+            ]
+            _langfuse_ingest(events)
+
+    def _langfuse_list_traces(limit=20):
+        if not LANGFUSE_URL or not LANGFUSE_PK or not LANGFUSE_SK:
+            return {"error": "Langfuse not configured"}
+        creds = base64.b64encode(f"{LANGFUSE_PK}:{LANGFUSE_SK}".encode()).decode()
+        try:
+            resp = _json_req(
+                LANGFUSE_URL + f"/api/public/traces?limit={limit}&orderBy=timestamp.desc",
+                headers={"Authorization": f"Basic {creds}"},
+                method="GET",
+            )
+            return {"status": "ok", "traces": resp.get("data", [])}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
     # ── HTTP handler ──────────────────────────────────────────────────────────
 
     class Handler(BaseHTTPRequestHandler):
@@ -426,6 +502,8 @@ data:
                 self._ok(HEALTH)
             elif self.path == "/api/v1/skills":
                 self._ok({"skills": SKILLS, "status": "active"})
+            elif self.path.startswith("/api/v1/traces"):
+                self._ok(_langfuse_list_traces())
             else:
                 self._ok({"status": "stub", "path": self.path})
 
@@ -444,7 +522,10 @@ data:
                     })
                     return
                 try:
-                    self._ok(vsphere_discover(vs_url, vs_user, vs_pass))
+                    inputs = {"vsphere_url": vs_url, "vsphere_user": vs_user}
+                    result = _trace_skill("vsphere_discover", inputs,
+                                          vsphere_discover, vs_url, vs_user, vs_pass)
+                    self._ok(result)
                 except (URLError, HTTPError) as e:
                     self._reply(502, {"error": f"vSphere API error: {e}"})
                 except Exception as e:
@@ -457,7 +538,10 @@ data:
                     return
                 granite = body.get("granite_url", GRANITE_URL)
                 try:
-                    self._ok(guest_analyzer(vms, granite_url=granite))
+                    inputs = {"vm_count": len(vms), "granite_url": granite or "env"}
+                    result = _trace_skill("guest_analyzer", inputs,
+                                          guest_analyzer, vms, granite_url=granite)
+                    self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
 
@@ -467,7 +551,10 @@ data:
                     self._reply(400, {"error": "vms array required"})
                     return
                 try:
-                    self._ok(mtv_manifest_gen(
+                    inputs = {"vm_count": len(vms),
+                              "target_namespace": body.get("target_namespace", "mtv-migrated")}
+                    result = _trace_skill("mtv_manifest_gen", inputs,
+                        mtv_manifest_gen,
                         vms,
                         target_namespace=body.get("target_namespace", "mtv-migrated"),
                         network_map=body.get("network_map"),
@@ -475,7 +562,8 @@ data:
                         vsphere_provider=body.get("vsphere_provider", "vsphere-source"),
                         warm=body.get("warm", False),
                         timeout=body.get("timeout", 600),
-                    ))
+                    )
+                    self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
 
