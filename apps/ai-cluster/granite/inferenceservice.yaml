@@ -1,0 +1,33 @@
+# Granite 3.3 8B Instruct — KServe InferenceService
+# Served via RHOAI KServe + vLLM runtime from OCI model (quay.io, no HF download needed)
+# Namespace: my-first-model (pre-provisioned by RHOAI demo environment)
+#
+# To activate:   oc patch inferenceservice granite-33-8b-instruct -n my-first-model \
+#                  --type=merge -p '{"spec":{"predictor":{"minReplicas":1}}}'
+# To deactivate: oc patch inferenceservice granite-33-8b-instruct -n my-first-model \
+#                  --type=merge -p '{"spec":{"predictor":{"minReplicas":0}}}'
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: granite-33-8b-instruct
+  namespace: my-first-model
+  labels:
+    ztp-modernization-factory: "true"
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    minReplicas: 0
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: granite-33-8b-instruct
+      storageUri: oci://quay.io/redhat-ai-services/modelcar-catalog:granite-3.3-8b-instruct
+      resources:
+        requests:
+          cpu: "1"
+          memory: 12Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 16Gi
+          nvidia.com/gpu: "1"

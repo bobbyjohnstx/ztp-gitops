@@ -1,0 +1,39 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-k8s
+  namespace: my-first-model
+rules:
+  - apiGroups: [""]
+    resources: [services, endpoints, pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-k8s
+  namespace: my-first-model
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus-k8s
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-user-workload
+    namespace: openshift-user-workload-monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: granite-33-8b-instruct-metrics
+  namespace: my-first-model
+  labels:
+    ztp-modernization-factory: "true"
+spec:
+  selector:
+    matchLabels:
+      serving.kserve.io/inferenceservice: granite-33-8b-instruct
+  endpoints:
+    - port: h2c
+      path: /metrics
+      interval: 15s
