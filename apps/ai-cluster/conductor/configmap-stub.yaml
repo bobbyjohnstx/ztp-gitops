@@ -8,25 +8,155 @@ metadata:
 data:
   app.py: |
     import json
+    import os
+    import ssl
+    import base64
     from http.server import HTTPServer, BaseHTTPRequestHandler
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError, HTTPError
 
     HEALTH = {"status": "UP"}
     SKILLS = ["vsphere_discover", "guest_analyzer", "mtv_manifest_gen",
               "pipeline_trigger", "evalops_trace", "self_heal"]
 
+    DEFAULT_VSPHERE_URL  = os.environ.get("VSPHERE_URL", "")
+    DEFAULT_VSPHERE_USER = os.environ.get("VSPHERE_USER", "")
+    DEFAULT_VSPHERE_PASS = os.environ.get("VSPHERE_PASSWORD", "")
+
+
+    # ── vSphere REST helpers ──────────────────────────────────────────────────
+
+    def _ssl_ctx():
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    def _vs_req(base, path, method="GET", token=None, user=None, pwd=None):
+        url = base.rstrip("/") + path
+        hdrs = {"Accept": "application/json", "Content-Type": "application/json"}
+        body = None
+        if token:
+            hdrs["vmware-api-session-id"] = token
+        elif user and pwd:
+            hdrs["Authorization"] = "Basic " + base64.b64encode(
+                f"{user}:{pwd}".encode()).decode()
+        req = Request(url, data=body, headers=hdrs, method=method)
+        with urlopen(req, context=_ssl_ctx(), timeout=20) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+
+    def vsphere_discover(url, user, pwd):
+        # 1. Authenticate — POST /api/session → quoted session-token string
+        tok_raw = _vs_req(url, "/api/session", method="POST", user=user, pwd=pwd)
+        token = tok_raw.strip('"') if isinstance(tok_raw, str) else tok_raw
+
+        try:
+            # 2. List VMs / networks / datastores
+            vms_raw        = _vs_req(url, "/api/vcenter/vm",        token=token) or []
+            networks_raw   = _vs_req(url, "/api/vcenter/network",   token=token) or []
+            datastores_raw = _vs_req(url, "/api/vcenter/datastore", token=token) or []
+
+            # 3. Enrich each VM (cap at 30 for demo latency)
+            vms = []
+            for vm in vms_raw[:30]:
+                vm_id = vm.get("vm", "")
+                entry = {
+                    "id":          vm_id,
+                    "name":        vm.get("name", ""),
+                    "power_state": vm.get("power_state", ""),
+                    "cpu_count":   vm.get("cpu_count", 0),
+                    "memory_gb":   round(vm.get("memory_size_MiB", 0) / 1024, 1),
+                }
+                try:
+                    det = _vs_req(url, f"/api/vcenter/vm/{vm_id}", token=token) or {}
+                    disks = det.get("disks", {})
+                    entry["disk_gb"] = round(sum(
+                        d.get("value", {}).get("capacity", 0)
+                        for d in disks.values()
+                    ) / (1024 ** 3), 1)
+                    entry["guest_os"] = det.get("guest_OS", "")
+                    entry["nics"] = [
+                        {
+                            "network_id":  n.get("value", {}).get("backing", {}).get("network", ""),
+                            "mac_address": n.get("value", {}).get("mac_address", ""),
+                        }
+                        for n in det.get("nics", {}).values()
+                    ]
+                except Exception:
+                    pass  # detail enrichment is best-effort
+                vms.append(entry)
+
+            networks = [
+                {"id": n.get("network", ""), "name": n.get("name", ""), "type": n.get("type", "")}
+                for n in networks_raw
+            ]
+            datastores = [
+                {
+                    "id":          d.get("datastore", ""),
+                    "name":        d.get("name", ""),
+                    "type":        d.get("type", ""),
+                    "capacity_gb": round(d.get("capacity", 0) / (1024 ** 3), 1),
+                    "free_gb":     round(d.get("free_space", 0) / (1024 ** 3), 1),
+                }
+                for d in datastores_raw
+            ]
+            return {
+                "status":      "ok",
+                "vm_count":    len(vms),
+                "vms":         vms,
+                "networks":    networks,
+                "datastores":  datastores,
+            }
+        finally:
+            try:
+                _vs_req(url, "/api/session", method="DELETE", token=token)
+            except Exception:
+                pass
+
+
+    # ── HTTP handler ──────────────────────────────────────────────────────────
 
     class Handler(BaseHTTPRequestHandler):
+
         def do_GET(self):
-            if self.path.startswith("/q/health") or self.path.startswith("/api/v1/cluster1/health"):
+            if self.path.startswith("/q/health") or \
+               self.path.startswith("/api/v1/cluster1/health"):
                 self._ok(HEALTH)
             elif self.path == "/api/v1/skills":
-                self._ok({"skills": SKILLS, "status": "stub"})
+                self._ok({"skills": SKILLS, "status": "active"})
+            else:
+                self._ok({"status": "stub", "path": self.path})
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+
+            if self.path == "/api/v1/skills/vsphere_discover":
+                vs_url  = body.get("vsphere_url",      DEFAULT_VSPHERE_URL)
+                vs_user = body.get("vsphere_user",     DEFAULT_VSPHERE_USER)
+                vs_pass = body.get("vsphere_password", DEFAULT_VSPHERE_PASS)
+                if not all([vs_url, vs_user, vs_pass]):
+                    self._reply(400, {
+                        "error": "vsphere_url, vsphere_user, vsphere_password required "
+                                 "(or set VSPHERE_URL / VSPHERE_USER / VSPHERE_PASSWORD env vars)"
+                    })
+                    return
+                try:
+                    self._ok(vsphere_discover(vs_url, vs_user, vs_pass))
+                except (URLError, HTTPError) as e:
+                    self._reply(502, {"error": f"vSphere API error: {e}"})
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
             else:
                 self._ok({"status": "stub", "path": self.path})
 
         def _ok(self, body):
-            data = json.dumps(body).encode()
-            self.send_response(200)
+            self._reply(200, body)
+
+        def _reply(self, code, body):
+            data = json.dumps(body, indent=2).encode()
+            self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -37,5 +167,5 @@ data:
 
 
     if __name__ == "__main__":
-        print("Conductor extensions stub listening on :8080", flush=True)
+        print("Conductor extensions listening on :8080", flush=True)
         HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
