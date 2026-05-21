@@ -27,7 +27,7 @@ data:
     DEFAULT_VSPHERE_USER = os.environ.get("VSPHERE_USER", "")
     DEFAULT_VSPHERE_PASS = os.environ.get("VSPHERE_PASSWORD", "")
     GRANITE_URL          = os.environ.get("RHOAI_GRANITE_URL", "")
-    GRANITE_MODEL        = "granite-33-8b-instruct"
+    GRANITE_MODEL        = os.environ.get("RHOAI_MODEL_NAME", "granite-33-8b-instruct")
     CLUSTER1_API_URL     = os.environ.get("CLUSTER1_API_URL", "").rstrip("/")
     CLUSTER1_TOKEN       = os.environ.get("CLUSTER1_TOKEN", "")
     MTV_NS               = "openshift-mtv"
