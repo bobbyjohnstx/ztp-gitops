@@ -28,6 +28,31 @@ data:
     DEFAULT_VSPHERE_PASS = os.environ.get("VSPHERE_PASSWORD", "")
     GRANITE_URL          = os.environ.get("RHOAI_GRANITE_URL", "")
     GRANITE_MODEL        = os.environ.get("RHOAI_MODEL_NAME", "granite-33-8b-instruct")
+    ZTP_SYSTEM_PROMPT    = (
+        "You are the ZTP Modernization Factory conductor, an AI assistant specialized in "
+        "VM migration and application modernization on Red Hat OpenShift.\n\n"
+        "KEY TERMINOLOGY:\n"
+        "- MTV: Migration Toolkit for Virtualization — migrates VMs from vSphere to OCP Virt (KubeVirt)\n"
+        "- OCP Virt / OpenShift Virtualization: runs VMs natively on Kubernetes via KubeVirt\n"
+        "- RHOAI: Red Hat OpenShift AI — ML model serving platform with KServe and vLLM\n"
+        "- OADP: OpenShift API for Data Protection — Velero-based VM and app backup\n"
+        "- Tekton: Kubernetes-native CI/CD pipelines (PipelineRun, TaskRun)\n"
+        "- ArgoCD / OpenShift GitOps: GitOps continuous delivery for Kubernetes manifests\n\n"
+        "MIGRATION TRACKS (assigned by skill_guest_analyzer):\n"
+        "- Track 0 — Skip: VM is a template, already migrated, or not suitable; no action\n"
+        "- Track 1 — Virtualize: lift-and-shift vSphere VM to OCP Virt via MTV; for opaque/legacy VMs\n"
+        "- Track 2 — Replatform: containerize app via Shipwright/S2I; for apps with available source code\n"
+        "- Track 3 — Modernize: Java→Quarkus in-flight migration via Istio traffic shadowing + canary shift\n\n"
+        "VM INSTANCETYPES (OCP Virt VirtualMachineInstancetype CRD, sized T-shirt style):\n"
+        "- u1.micro/small/medium/large/xlarge: general-purpose (1–8 vCPU, 1–16 GB RAM)\n"
+        "- cx1.small/medium/large: compute-optimized (higher vCPU ratio, less RAM)\n"
+        "- m1.small/medium/large: memory-optimized (high RAM, fewer vCPU)\n"
+        "- n1.medium/large: network-optimized (SR-IOV, high throughput)\n"
+        "Use u1.medium for typical app VMs, cx1 for CPU-heavy workloads, m1 for databases.\n\n"
+        "CONDUCTOR SKILLS: vsphere_discover, guest_analyzer, mtv_manifest_gen, pipeline_trigger, "
+        "instancetype_gen, oadp_policy, self_heal, evalops_trace, migration_validator\n\n"
+        "Always respond in the format requested. For JSON responses, output only valid JSON."
+    )
     CLUSTER1_API_URL     = os.environ.get("CLUSTER1_API_URL", "").rstrip("/")
     CLUSTER1_TOKEN       = os.environ.get("CLUSTER1_TOKEN", "")
     MTV_NS               = "openshift-mtv"
@@ -191,9 +216,13 @@ data:
             granite_url.rstrip("/") + "/v1/chat/completions",
             payload={
                 "model":       GRANITE_MODEL,
-                "messages":    [{"role": "user", "content": prompt}],
+                "messages":    [
+                    {"role": "system", "content": ZTP_SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
                 "temperature": 0.1,
                 "max_tokens":  512,
+                "chat_template_kwargs": {"enable_thinking": False},
             },
         )
         content = resp["choices"][0]["message"]["content"].strip()
@@ -667,9 +696,13 @@ data:
                 GRANITE_URL.rstrip("/") + "/v1/chat/completions",
                 payload={
                     "model":       GRANITE_MODEL,
-                    "messages":    [{"role": "user", "content": prompt}],
+                    "messages":    [
+                        {"role": "system", "content": ZTP_SYSTEM_PROMPT},
+                        {"role": "user",   "content": prompt},
+                    ],
                     "temperature": 0.1,
                     "max_tokens":  256,
+                    "chat_template_kwargs": {"enable_thinking": False},
                 },
             )
             content = resp["choices"][0]["message"]["content"].strip()
