@@ -14,7 +14,6 @@ data:
       "editable": true,
       "fiscalYearStartMonth": 0,
       "graphTooltip": 0,
-      "id": null,
       "links": [],
       "panels": [
         {
@@ -53,11 +52,11 @@ data:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "values": false,
               "calcs": [
                 "lastNotNull"
               ],
-              "fields": ""
+              "fields": "",
+              "values": false
             },
             "textMode": "auto"
           },
@@ -115,11 +114,11 @@ data:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "values": false,
               "calcs": [
                 "lastNotNull"
               ],
-              "fields": ""
+              "fields": "",
+              "values": false
             },
             "textMode": "auto"
           },
@@ -173,11 +172,11 @@ data:
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
-              "values": false,
               "calcs": [
                 "lastNotNull"
               ],
-              "fields": ""
+              "fields": "",
+              "values": false
             },
             "textMode": "auto"
           },
@@ -241,11 +240,11 @@ data:
             "minVizWidth": 75,
             "orientation": "auto",
             "reduceOptions": {
-              "values": false,
               "calcs": [
                 "lastNotNull"
               ],
-              "fields": ""
+              "fields": "",
+              "values": false
             },
             "showThresholdLabels": false,
             "showThresholdMarkers": true
@@ -285,9 +284,9 @@ data:
                 "fillOpacity": 10,
                 "gradientMode": "none",
                 "hideFrom": {
+                  "legend": false,
                   "tooltip": false,
-                  "viz": false,
-                  "legend": false
+                  "viz": false
                 },
                 "insertNulls": false,
                 "lineInterpolation": "linear",
@@ -375,9 +374,9 @@ data:
                 "fillOpacity": 10,
                 "gradientMode": "none",
                 "hideFrom": {
+                  "legend": false,
                   "tooltip": false,
-                  "viz": false,
-                  "legend": false
+                  "viz": false
                 },
                 "insertNulls": false,
                 "lineInterpolation": "linear",
@@ -456,9 +455,9 @@ data:
               },
               "custom": {
                 "hideFrom": {
+                  "legend": false,
                   "tooltip": false,
-                  "viz": false,
-                  "legend": false
+                  "viz": false
                 }
               },
               "mappings": []
@@ -485,11 +484,11 @@ data:
             },
             "pieType": "pie",
             "reduceOptions": {
-              "values": false,
               "calcs": [
                 "lastNotNull"
               ],
-              "fields": ""
+              "fields": "",
+              "values": false
             },
             "tooltip": {
               "mode": "single",
@@ -530,9 +529,9 @@ data:
                 "fillOpacity": 80,
                 "gradientMode": "none",
                 "hideFrom": {
+                  "legend": false,
                   "tooltip": false,
-                  "viz": false,
-                  "legend": false
+                  "viz": false
                 },
                 "lineWidth": 1,
                 "scaleDistribution": {
@@ -672,9 +671,9 @@ data:
                 },
                 "indexByName": {},
                 "renameByName": {
-                  "skill": "Skill",
+                  "Value": "Count",
                   "error_type": "Error Type",
-                  "Value": "Count"
+                  "skill": "Skill"
                 }
               }
             }
@@ -696,6 +695,462 @@ data:
       "timezone": "",
       "title": "ZTP Modernization Factory - Conductor Skills",
       "uid": "ztp-conductor-skills",
-      "version": 0,
       "weekStart": ""
+    }
+  vsphere.json: |
+    {
+      "panels": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "targets": [
+            {
+              "expr": "vsphere_vm_count{power_state=\"POWERED_ON\"}"
+            }
+          ],
+          "title": "VMs On",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "orange",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "id": 2,
+          "targets": [
+            {
+              "expr": "vsphere_vm_count{power_state=\"POWERED_OFF\"}"
+            }
+          ],
+          "title": "VMs Off",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "id": 3,
+          "targets": [
+            {
+              "expr": "vsphere_vm_cpu_total"
+            }
+          ],
+          "title": "vCPUs",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "decgbytes"
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "id": 4,
+          "targets": [
+            {
+              "expr": "vsphere_vm_memory_gb_total"
+            }
+          ],
+          "title": "Memory GB",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 5
+          },
+          "id": 7,
+          "targets": [
+            {
+              "expr": "vsphere_vm_info",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "title": "VM Inventory",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "container": true,
+                  "endpoint": true,
+                  "instance": true,
+                  "job": true,
+                  "namespace": true,
+                  "pod": true,
+                  "prometheus": true,
+                  "service": true
+                },
+                "renameByName": {
+                  "guest_os": "Guest OS",
+                  "name": "VM Name",
+                  "power_state": "Power State"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 15
+          },
+          "id": 8,
+          "targets": [
+            {
+              "expr": "vsphere_vm_count",
+              "legendFormat": "{{power_state}}"
+            }
+          ],
+          "title": "By Power State",
+          "type": "piechart"
+        },
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 15
+          },
+          "id": 9,
+          "targets": [
+            {
+              "expr": "sum by (guest_os)(vsphere_vm_info)",
+              "legendFormat": "{{guest_os}}"
+            }
+          ],
+          "title": "By Guest OS",
+          "type": "piechart"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "title": "vSphere Inventory",
+      "uid": "vsphere-inventory"
+    }
+  vm-migration.json: |
+    {
+      "panels": [
+        {
+          "datasource": {
+            "uid": "virt-prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "targets": [
+            {
+              "expr": "count(kubevirt_vmi_info{phase=\"running\"})"
+            }
+          ],
+          "title": "VMs in OCP Virt",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "virt-prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 8,
+            "y": 0
+          },
+          "id": 2,
+          "targets": [
+            {
+              "expr": "sum(kubevirt_vmi_migrations_in_running_phase) or vector(0)"
+            }
+          ],
+          "title": "Migrations Active",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "virt-prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "decgbytes"
+            }
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 16,
+            "y": 0
+          },
+          "id": 3,
+          "targets": [
+            {
+              "expr": "sum(kubevirt_vmi_memory_used_bytes)/1024/1024/1024"
+            }
+          ],
+          "title": "VM Memory",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "uid": "virt-prometheus"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 5
+          },
+          "id": 5,
+          "targets": [
+            {
+              "expr": "kubevirt_vmi_info{phase=\"running\"}",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "title": "Running VMs",
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "container": true,
+                  "endpoint": true,
+                  "evictable": true,
+                  "guest_os_machine": true,
+                  "instance": true,
+                  "job": true,
+                  "prometheus": true,
+                  "service": true
+                },
+                "renameByName": {
+                  "name": "VM",
+                  "namespace": "Namespace",
+                  "node": "Node",
+                  "phase": "Phase"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "uid": "virt-prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 15
+          },
+          "id": 6,
+          "targets": [
+            {
+              "expr": "rate(kubevirt_vmi_cpu_usage_seconds_total[5m])",
+              "legendFormat": "{{name}}"
+            }
+          ],
+          "title": "VM CPU Usage",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "uid": "virt-prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 15
+          },
+          "id": 7,
+          "targets": [
+            {
+              "expr": "rate(kubevirt_vmi_network_receive_bytes_total[5m])",
+              "legendFormat": "{{name}} rx"
+            },
+            {
+              "expr": "rate(kubevirt_vmi_network_transmit_bytes_total[5m])",
+              "legendFormat": "{{name}} tx"
+            }
+          ],
+          "title": "VM Network",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "title": "VM Migration Status",
+      "uid": "vm-migration"
     }
