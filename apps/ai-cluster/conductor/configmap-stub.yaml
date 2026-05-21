@@ -421,23 +421,26 @@ data:
 
     # ── Langfuse tracing helpers ─────────────────────────────────────────────
 
-    def _langfuse_ingest(events):
+    _TRACE_BUFFER = []
+
+    def _langfuse_auth():
+        return base64.b64encode(f"{LANGFUSE_PK}:{LANGFUSE_SK}".encode()).decode()
+
+    def _langfuse_post(path, payload):
         if not LANGFUSE_URL or not LANGFUSE_PK or not LANGFUSE_SK:
-            return
-        creds = base64.b64encode(f"{LANGFUSE_PK}:{LANGFUSE_SK}".encode()).decode()
+            return None
         try:
-            _json_req(
-                LANGFUSE_URL + "/api/public/ingestion",
-                payload={"batch": events},
-                headers={"Authorization": f"Basic {creds}"},
+            return _json_req(
+                LANGFUSE_URL + path,
+                payload=payload,
+                headers={"Authorization": f"Basic {_langfuse_auth()}"},
             )
         except Exception:
-            pass
+            return None
 
     def _trace_skill(skill_name, inputs, func, *args, **kwargs):
         import uuid
         trace_id = str(uuid.uuid4())
-        span_id  = str(uuid.uuid4())
         t0 = time.time()
         start_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0))
         error = None
@@ -453,43 +456,32 @@ data:
             end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t1))
             duration_ms = round((t1 - t0) * 1000)
             status = result.get("status", "unknown") if isinstance(result, dict) else "error"
-            events = [
-                {"type": "trace-create", "id": str(uuid.uuid4()),
-                 "timestamp": start_iso,
-                 "body": {
-                     "id": trace_id, "name": skill_name,
-                     "input": inputs, "output": result,
-                     "metadata": {"duration_ms": duration_ms,
-                                  "status": status,
-                                  "error": error},
-                 }},
-                {"type": "span-create", "id": str(uuid.uuid4()),
-                 "timestamp": start_iso,
-                 "body": {
-                     "traceId": trace_id, "id": span_id,
-                     "name": skill_name,
-                     "startTime": start_iso, "endTime": end_iso,
-                     "input": inputs, "output": result,
-                     "metadata": {"duration_ms": duration_ms},
-                     "level": "ERROR" if error else "DEFAULT",
-                     "statusMessage": error or "ok",
-                 }},
-            ]
-            _langfuse_ingest(events)
+            trace = {
+                "id": trace_id, "name": skill_name,
+                "timestamp": start_iso,
+                "input": inputs,
+                "output": {"status": status, "duration_ms": duration_ms},
+                "metadata": {"error": error},
+            }
+            _langfuse_post("/api/public/traces", trace)
+            _langfuse_post("/api/public/spans", {
+                "traceId": trace_id, "name": skill_name,
+                "startTime": start_iso, "endTime": end_iso,
+                "input": inputs, "output": result,
+                "metadata": {"duration_ms": duration_ms},
+                "level": "ERROR" if error else "DEFAULT",
+                "statusMessage": error or "ok",
+            })
+            entry = {"id": trace_id, "name": skill_name,
+                     "timestamp": start_iso, "duration_ms": duration_ms,
+                     "status": status, "error": error}
+            _TRACE_BUFFER.append(entry)
+            if len(_TRACE_BUFFER) > 100:
+                _TRACE_BUFFER.pop(0)
 
     def _langfuse_list_traces(limit=20):
-        if not LANGFUSE_URL or not LANGFUSE_PK or not LANGFUSE_SK:
-            return {"error": "Langfuse not configured"}
-        creds = base64.b64encode(f"{LANGFUSE_PK}:{LANGFUSE_SK}".encode()).decode()
-        try:
-            resp = _json_req(
-                LANGFUSE_URL + f"/api/public/traces?limit={limit}&orderBy=timestamp.desc",
-                headers={"Authorization": f"Basic {creds}"},
-                method="GET",
-            )
-            return {"status": "ok", "traces": resp.get("data", [])}
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        recent = list(reversed(_TRACE_BUFFER[-limit:]))
+        return {"status": "ok", "trace_count": len(_TRACE_BUFFER), "traces": recent}
 
 
     # ── HTTP handler ──────────────────────────────────────────────────────────
