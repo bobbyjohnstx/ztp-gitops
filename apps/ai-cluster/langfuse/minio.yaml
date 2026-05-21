@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-minio
+  namespace: langfuse
+  labels:
+    app: langfuse-minio
+    ztp-modernization-factory: "true"
+spec:
+  serviceName: langfuse-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-minio
+  template:
+    metadata:
+      labels:
+        app: langfuse-minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:latest
+          command: ["minio", "server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: access_key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: secret_key
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: minio-data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-minio
+  namespace: langfuse
+  labels:
+    app: langfuse-minio
+    ztp-modernization-factory: "true"
+spec:
+  selector:
+    app: langfuse-minio
+  ports:
+    - port: 9000
+      name: api
+      targetPort: 9000
+    - port: 9001
+      name: console
+      targetPort: 9001
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langfuse-minio-bucket-setup
+  namespace: langfuse
+  labels:
+    ztp-modernization-factory: "true"
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      initContainers:
+        - name: wait-for-minio
+          image: quay.io/minio/mc:latest
+          command:
+            - sh
+            - -c
+            - until MC_CONFIG_DIR=/tmp/.mc mc alias set myminio http://langfuse-minio.langfuse.svc.cluster.local:9000 $ACCESS_KEY $SECRET_KEY 2>/dev/null; do sleep 3; done
+          env:
+            - name: ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: access_key
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: secret_key
+      containers:
+        - name: create-bucket
+          image: quay.io/minio/mc:latest
+          command:
+            - sh
+            - -c
+            - |
+              MC_CONFIG_DIR=/tmp/.mc mc alias set myminio http://langfuse-minio.langfuse.svc.cluster.local:9000 $ACCESS_KEY $SECRET_KEY && \
+              MC_CONFIG_DIR=/tmp/.mc mc mb --ignore-existing myminio/langfuse-events && \
+              echo "Bucket langfuse-events ready"
+          env:
+            - name: ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: access_key
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: secret_key
+      restartPolicy: OnFailure

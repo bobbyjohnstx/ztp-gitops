@@ -23,6 +23,29 @@ spec:
             - sh
             - -c
             - until pg_isready -h langfuse-postgres.langfuse.svc.cluster.local -U langfuse; do sleep 2; done
+        - name: wait-for-clickhouse
+          image: docker.io/clickhouse/clickhouse-server:24-alpine
+          command:
+            - sh
+            - -c
+            - until wget -q -O /dev/null http://langfuse-clickhouse.langfuse.svc.cluster.local:8123/ping; do sleep 2; done
+        - name: wait-for-minio
+          image: quay.io/minio/mc:latest
+          command:
+            - sh
+            - -c
+            - until MC_CONFIG_DIR=/tmp/.mc mc alias set myminio http://langfuse-minio.langfuse.svc.cluster.local:9000 $ACCESS_KEY $SECRET_KEY 2>/dev/null; do sleep 3; done
+          env:
+            - name: ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: access_key
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: secret_key
       containers:
         - name: langfuse
           image: ghcr.io/langfuse/langfuse:3
@@ -45,6 +68,40 @@ spec:
                 secretKeyRef:
                   name: langfuse-secrets
                   key: nextauth_url
+            - name: SALT
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: salt
+            - name: CLICKHOUSE_URL
+              value: "http://langfuse-clickhouse.langfuse.svc.cluster.local:8123"
+            - name: CLICKHOUSE_MIGRATION_URL
+              value: "clickhouse://langfuse-clickhouse.langfuse.svc.cluster.local:9000"
+            - name: CLICKHOUSE_USER
+              value: "default"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-secret
+                  key: password
+            - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+              value: "langfuse-events"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+              value: "us-east-1"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+              value: "http://langfuse-minio.langfuse.svc.cluster.local:9000"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+              value: "true"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: access_key
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: secret_key
             - name: LANGFUSE_INIT_ORG_NAME
               value: ztp-factory
             - name: LANGFUSE_INIT_PROJECT_NAME

@@ -19,7 +19,7 @@ spec:
       serviceAccountName: default
       containers:
         - name: conductor
-          image: quay.io/ztp-factory/conductor-extensions:latest
+          image: quay.io/bjohns/conductor-extensions:latest
           ports:
             - containerPort: 8080
               name: http
