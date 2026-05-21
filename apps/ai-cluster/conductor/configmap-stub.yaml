@@ -21,7 +21,7 @@ data:
     HEALTH = {"status": "UP"}
     SKILLS = ["vsphere_discover", "guest_analyzer", "mtv_manifest_gen",
               "pipeline_trigger", "evalops_trace", "self_heal",
-              "oadp_policy", "instancetype_gen"]
+              "oadp_policy", "instancetype_gen", "migration_validator"]
 
     DEFAULT_VSPHERE_URL  = os.environ.get("VSPHERE_URL", "")
     DEFAULT_VSPHERE_USER = os.environ.get("VSPHERE_USER", "")
@@ -691,6 +691,126 @@ data:
         }
 
 
+    # ── skill_migration_validator ────────────────────────────────────────────
+
+    _EXPECTED_PORTS = {
+        "database": [22, 3306],
+        "winweb": [80, 3389],
+        "haproxy": [80, 5000],
+    }
+
+    def migration_validator(namespace="mtv-migrated-user1", vm_names=None, port_scan=True):
+        if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
+            return {"status": "error",
+                    "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
+        base = CLUSTER1_API_URL
+        tok  = CLUSTER1_TOKEN
+        try:
+            resp = _k8s_req(
+                base + f"/apis/kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances",
+                tok)
+            vmis = resp.get("items", [])
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+        if vm_names:
+            vmis = [v for v in vmis if v["metadata"]["name"] in vm_names]
+
+        try:
+            pvcs_resp = _k8s_req(
+                base + f"/api/v1/namespaces/{namespace}/persistentvolumeclaims", tok)
+            pvcs = {p["metadata"]["name"]: p for p in pvcs_resp.get("items", [])}
+        except Exception:
+            pvcs = {}
+
+        validations = []
+        for vmi in vmis:
+            name = vmi["metadata"]["name"]
+            status = vmi.get("status", {})
+            conditions = {c["type"]: c.get("status") == "True"
+                          for c in status.get("conditions", [])}
+            guest = status.get("guestOSInfo", {})
+            ifaces = status.get("interfaces", [])
+            ip = ifaces[0].get("ipAddress", "") if ifaces else ""
+            mac = ifaces[0].get("mac", "") if ifaces else ""
+            iface_name = ifaces[0].get("interfaceName", "") if ifaces else ""
+
+            vols = vmi.get("spec", {}).get("volumes", [])
+            disk_count = 0
+            total_gb = 0
+            sc = ""
+            for vol in vols:
+                dv = vol.get("dataVolume", {}).get("name", "")
+                pvc_name = vol.get("persistentVolumeClaim", {}).get("claimName", dv)
+                if pvc_name and pvc_name in pvcs:
+                    disk_count += 1
+                    cap = pvcs[pvc_name].get("status", {}).get("capacity", {}).get("storage", "0")
+                    gb = int(cap.replace("Gi", "")) if "Gi" in cap else 0
+                    total_gb += gb
+                    sc = pvcs[pvc_name].get("spec", {}).get("storageClassName", sc)
+
+            expected = []
+            for pattern, ports in _EXPECTED_PORTS.items():
+                if pattern in name.lower():
+                    expected = ports
+                    break
+
+            issues = []
+            if status.get("phase") != "Running":
+                issues.append(f"VMI not running (phase={status.get('phase')})")
+            if not conditions.get("AgentConnected"):
+                issues.append("Guest agent not connected")
+            if not guest.get("name"):
+                issues.append("Guest OS info not reported")
+            if not ip:
+                issues.append("No IP address assigned")
+
+            health = "healthy"
+            if issues:
+                health = "degraded" if status.get("phase") == "Running" else "unhealthy"
+
+            entry = {
+                "vm_name": name,
+                "namespace": namespace,
+                "phase": status.get("phase", "Unknown"),
+                "node": status.get("nodeName", ""),
+                "ip_address": ip,
+                "guest_agent": {
+                    "connected": conditions.get("AgentConnected", False),
+                    "os_name": guest.get("prettyName", guest.get("name", "")),
+                    "os_version": guest.get("versionId", ""),
+                    "kernel": guest.get("kernelRelease", ""),
+                },
+                "network": {
+                    "interface": iface_name,
+                    "mac_address": mac,
+                    "ip_addresses": ifaces[0].get("ipAddresses", []) if ifaces else [],
+                },
+                "storage": {
+                    "disks": disk_count,
+                    "total_gb": total_gb,
+                    "storage_class": sc,
+                },
+                "ports": [],
+                "live_migratable": conditions.get("LiveMigratable", False),
+                "health": health,
+                "issues": issues,
+            }
+            validations.append(entry)
+
+        summary = {"healthy": 0, "degraded": 0, "unhealthy": 0}
+        for v in validations:
+            summary[v["health"]] = summary.get(v["health"], 0) + 1
+
+        all_ok = summary["unhealthy"] == 0
+        return {
+            "status": "ok" if all_ok and summary["degraded"] == 0 else "partial" if all_ok else "failed",
+            "vm_count": len(validations),
+            "validations": validations,
+            "summary": summary,
+        }
+
+
     # ── /api/v1/migrate — end-to-end orchestration ───────────────────────────
 
     def migrate(vs_url, vs_user, vs_pass, options=None):
@@ -1137,6 +1257,19 @@ data:
                     result = _trace_skill("self_heal", inputs,
                         self_heal, skill_name, error_msg,
                         context=body.get("context"))
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/migration_validator":
+                try:
+                    ns = body.get("namespace", "mtv-migrated-user1")
+                    inputs = {"namespace": ns}
+                    result = _trace_skill("migration_validator", inputs,
+                        migration_validator,
+                        namespace=ns,
+                        vm_names=body.get("vms"),
+                        port_scan=body.get("port_scan", False))
                     self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
