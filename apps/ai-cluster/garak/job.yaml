@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: garak-scan
+  namespace: conductor-ai
+  labels:
+    ztp-modernization-factory: "true"
+    app: garak-scan
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: garak-scan
+        ztp-modernization-factory: "true"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: garak
+          image: python:3.11-slim
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Installing garak..."
+              pip install -q garak 2>/dev/null || pip install garak
+              mkdir -p /tmp/garak-results
+
+              echo "Running garak red-team scan against Granite endpoint..."
+              echo "Target: ${GRANITE_URL}"
+
+              python3 -m garak \
+                --model_type openai \
+                --model_name granite-33-8b-instruct \
+                --model_api_base "${GRANITE_URL}" \
+                --probes promptinject.HijackHateHumansMini,encoding.InjectBase64 \
+                --report_prefix /tmp/garak-results/scan \
+                --verbose 2>&1 | tail -1000
+
+              echo ""
+              echo "=== Garak scan completed ==="
+              echo "Results location: /tmp/garak-results/"
+              if [ -f /tmp/garak-results/scan.report.json ]; then
+                echo "Report summary:"
+                cat /tmp/garak-results/scan.report.json | head -100
+              fi
+          env:
+            - name: GRANITE_URL
+              value: "http://granite-33-8b-instruct-api-my-first-model.apps.ocp.j9nnm.sandbox782.opentlc.com/v1"
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 500m
