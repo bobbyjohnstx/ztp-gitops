@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: conductor-agent-rolebinding
+  labels:
+    ztp-modernization-factory: "true"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: conductor-agent-role
+subjects:
+  - kind: ServiceAccount
+    name: conductor-agent
+    namespace: ztp-factory

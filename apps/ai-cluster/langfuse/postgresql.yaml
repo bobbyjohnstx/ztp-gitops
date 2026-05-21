@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-postgres-pvc
+  namespace: langfuse
+  labels:
+    app: langfuse-postgres
+    ztp-modernization-factory: "true"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-postgres
+  namespace: langfuse
+  labels:
+    app: langfuse-postgres
+    ztp-modernization-factory: "true"
+spec:
+  serviceName: langfuse-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-postgres
+  template:
+    metadata:
+      labels:
+        app: langfuse-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: docker.io/postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: langfuse
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-postgres-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-postgres-secret
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "langfuse", "-d", "langfuse"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: langfuse-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-postgres
+  namespace: langfuse
+  labels:
+    app: langfuse-postgres
+    ztp-modernization-factory: "true"
+spec:
+  selector:
+    app: langfuse-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+  clusterIP: None

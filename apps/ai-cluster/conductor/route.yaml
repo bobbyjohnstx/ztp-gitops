@@ -1,0 +1,16 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: conductor-extensions
+  namespace: conductor-ai
+  labels:
+    ztp-modernization-factory: "true"
+spec:
+  to:
+    kind: Service
+    name: conductor-extensions
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

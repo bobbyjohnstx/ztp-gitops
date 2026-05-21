@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse
+  namespace: langfuse
+  labels:
+    app: langfuse
+    ztp-modernization-factory: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse
+  template:
+    metadata:
+      labels:
+        app: langfuse
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: docker.io/postgres:15
+          command:
+            - sh
+            - -c
+            - until pg_isready -h langfuse-postgres.langfuse.svc.cluster.local -U langfuse; do sleep 2; done
+      containers:
+        - name: langfuse
+          image: ghcr.io/langfuse/langfuse:3
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: database_url
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: nextauth_secret
+            - name: NEXTAUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: nextauth_url
+            - name: LANGFUSE_INIT_ORG_NAME
+              value: ztp-factory
+            - name: LANGFUSE_INIT_PROJECT_NAME
+              value: migration-evals
+            - name: TELEMETRY_ENABLED
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

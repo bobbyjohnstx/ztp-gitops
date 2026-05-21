@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conductor-extensions
+  namespace: conductor-ai
+  labels:
+    app: conductor-extensions
+    ztp-modernization-factory: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: conductor-extensions
+  template:
+    metadata:
+      labels:
+        app: conductor-extensions
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: conductor
+          image: quay.io/ztp-factory/conductor-extensions:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: conductor-config
+          env:
+            - name: CLUSTER1_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cluster1-credentials
+                  key: token
+                  optional: true
+            - name: MAAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: maas-credentials
+                  key: api_key
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

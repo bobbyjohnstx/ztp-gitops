@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ztp-ai-langfuse
+  namespace: openshift-gitops
+  labels:
+    ztp-modernization-factory: "true"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ${GIT_REPO_URL}
+    targetRevision: main
+    path: gitops/apps/ai-cluster/langfuse
+  destination:
+    server: ${AI_CLUSTER_URL}
+    namespace: langfuse
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

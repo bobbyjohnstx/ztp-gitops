@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conductor-config
+  namespace: conductor-ai
+  labels:
+    ztp-modernization-factory: "true"
+data:
+  # Populated with cluster-specific values by activate-demo.sh Stage 8
+  # ArgoCD ignoreDifferences is set on this ConfigMap — Stage 8 patches win
+  CLUSTER1_API_URL: ""
+  ELASTICSEARCH_URL: ""
+  LANGFUSE_URL: ""
+  RHOAI_LLAMA_URL: ""
+  RHOAI_GRANITE_CODE_URL: ""
+  RHOAI_GRANITE_GUARDIAN_URL: ""
+  MAAS_BASE_URL: "https://litellm-prod.apps.maas.redhatworkshops.io"
+  MAAS_QUARKUS_MODEL: "llama-scout-17b"
+  MAAS_JUDGE_MODEL: "deepseek-r1-distill-qwen-14b"
+  SKILLS_ENABLED: "vsphere_discover,guest_analyzer,mtv_manifest_gen,pipeline_trigger,evalops_trace,self_heal"

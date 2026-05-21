@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ztp-virt-rbac
+  namespace: openshift-gitops
+  labels:
+    ztp-modernization-factory: "true"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ${GIT_REPO_URL}
+    targetRevision: main
+    path: gitops/apps/virt-cluster/rbac
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ztp-factory
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
