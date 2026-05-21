@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: ${GIT_REPO_URL}
     targetRevision: main
-    path: gitops/apps/ai-cluster/langfuse
+    path: apps/ai-cluster/langfuse
   destination:
     server: ${AI_CLUSTER_URL}
     namespace: langfuse

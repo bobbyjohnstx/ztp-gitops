@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: ${GIT_REPO_URL}
     targetRevision: main
-    path: gitops/apps/virt-cluster/rbac
+    path: apps/virt-cluster/rbac
   destination:
     server: https://kubernetes.default.svc
     namespace: ztp-factory
