@@ -344,7 +344,7 @@ data:
         if storage_map is None:
             storage_map = {
                 "source_id": "datastore-1032",
-                "storage_class": "ocs-storagecluster-ceph-rbd",
+                "storage_class": "ocs-external-storagecluster-ceph-rbd",
                 "access_mode": "ReadWriteMany",
                 "volume_mode": "Block",
             }
@@ -375,17 +375,19 @@ data:
                                "destination": nm_dest}],
                       "provider": provider_ref}}, tok)
 
+        sm_dest = {
+            "storageClass": storage_map.get("storage_class", "ocs-external-storagecluster-ceph-rbd"),
+            "accessMode":   storage_map.get("access_mode",   "ReadWriteMany"),
+            "volumeMode":   storage_map.get("volume_mode",   "Block"),
+        }
+        sm_sources = storage_map.get("source_ids",
+            ["datastore-1032", "datastore-5031"])
+        sm_map = [{"source": {"id": sid}, "destination": sm_dest} for sid in sm_sources]
         _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/storagemaps",
             {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "StorageMap",
              "metadata": {"name": sm_name, "namespace": MTV_NS,
                           "labels": {"ztp-modernization-factory": "true"}},
-             "spec": {"map": [{"source": {"id": storage_map.get("source_id", "datastore-1032")},
-                               "destination": {
-                                   "storageClass": storage_map.get("storage_class", "ocs-storagecluster-ceph-rbd"),
-                                   "accessMode":   storage_map.get("access_mode",   "ReadWriteMany"),
-                                   "volumeMode":   storage_map.get("volume_mode",   "Block"),
-                               }}],
-                      "provider": provider_ref}}, tok)
+             "spec": {"map": sm_map, "provider": provider_ref}}, tok)
 
         # Ensure target namespace exists on the destination cluster
         _k8s_create(base, "/api/v1/namespaces",
@@ -584,7 +586,7 @@ data:
                  "kind": "VirtualMachinePreference",
                  "metadata": {"name": pr_name, "namespace": ns,
                               "labels": {"ztp-modernization-factory": "true"}},
-                 "spec": {"preferredStorageClassName": "ocs-storagecluster-ceph-rbd"}}, tok)
+                 "spec": {"preferredStorageClassName": "ocs-external-storagecluster-ceph-rbd"}}, tok)
             results.append({"vm_name": vm.get("name", ""),
                             "type_name": type_name, "instance_type": it_name,
                             "preference_name": pr_name,
