@@ -869,6 +869,119 @@ data:
         return {"status": "ok", "trace_count": len(_TRACE_BUFFER), "traces": recent}
 
 
+    # ── Landing page ─────────────────────────────────────────────────────────
+
+    def _landing_page(grafana_url, langfuse_url):
+        g = grafana_url.rstrip("/") if grafana_url else ""
+        l = langfuse_url.rstrip("/") if langfuse_url else ""
+        return (
+            '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1.0">'
+            '<title>ZTP Modernization Factory</title><style>'
+            '*{margin:0;padding:0;box-sizing:border-box}'
+            'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;'
+            'background:#0f0f0f;color:#fff;line-height:1.6}'
+            '.c{max-width:1600px;margin:0 auto;padding:2rem}'
+            'header{text-align:center;margin-bottom:2rem;border-bottom:2px solid #e00;padding-bottom:1.5rem}'
+            'h1{font-size:2.5rem;font-weight:700;color:#e00;letter-spacing:-0.02em}'
+            '.sub{font-size:1.1rem;color:#a0a0a0;font-weight:300}'
+            '.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:2rem}'
+            '.card{background:linear-gradient(135deg,#1a1a1a,#252525);border:1px solid #333;'
+            'border-radius:8px;padding:1.25rem;transition:transform .2s,border-color .2s}'
+            '.card:hover{transform:translateY(-3px);border-color:#e00}'
+            '.lbl{font-size:.8rem;color:#a0a0a0;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.3rem}'
+            '.val{font-size:2.2rem;font-weight:700;color:#00b9e4;line-height:1}'
+            '.pulse::after{content:"";display:inline-block;width:8px;height:8px;background:#0f0;'
+            'border-radius:50%;margin-left:.5rem;animation:p 2s infinite}'
+            '@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}'
+            '.sec{font-size:1.2rem;font-weight:600;color:#e00;text-transform:uppercase;'
+            'letter-spacing:.05em;margin:1.5rem 0 1rem}'
+            '.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(480px,1fr));gap:1rem;margin-bottom:2rem}'
+            '.pnl{background:#1a1a1a;border:1px solid #333;border-radius:8px;overflow:hidden;height:350px}'
+            '.pnl-t{background:#252525;padding:.75rem 1rem;font-weight:600;border-bottom:1px solid #e00;font-size:.9rem}'
+            '.pnl iframe{width:100%;height:calc(100% - 45px);border:0}'
+            'table{width:100%;border-collapse:collapse;background:#1a1a1a;border:1px solid #333;border-radius:8px}'
+            'thead{background:#252525}'
+            'th{padding:.75rem 1rem;text-align:left;font-weight:600;color:#00b9e4;text-transform:uppercase;font-size:.8rem}'
+            'td{padding:.75rem 1rem;border-top:1px solid #333;color:#e0e0e0;font-size:.9rem}'
+            'tbody tr:hover{background:#252525}'
+            '.badge{display:inline-block;padding:.15rem .5rem;border-radius:10px;font-size:.7rem;font-weight:600;text-transform:uppercase}'
+            '.b-ok{background:rgba(0,255,65,.2);color:#0f0}'
+            '.b-err{background:rgba(238,0,0,.2);color:#e00}'
+            '.b-warn{background:rgba(255,165,0,.2);color:orange}'
+            '.sk{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:.75rem;margin-bottom:2rem}'
+            '.ski{background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:.75rem 1rem;'
+            'font-family:"Courier New",monospace;font-size:.85rem}'
+            '.ski b{color:#e00}.ski .ep{color:#00b9e4}'
+            'footer{text-align:center;padding:1.5rem 0;border-top:1px solid #333;color:#666;font-size:.85rem}'
+            'footer a{color:#00b9e4;text-decoration:none;margin:0 1rem}'
+            'footer a:hover{color:#e00}'
+            '@media(max-width:1024px){h1{font-size:1.8rem}.panels{grid-template-columns:1fr}.c{padding:1rem}}'
+            '</style></head><body><div class="c">'
+            '<header><h1>ZTP MODERNIZATION FACTORY</h1>'
+            '<p class="sub">Autonomous Migration &amp; Modernization Conductor</p></header>'
+            '<div class="grid">'
+            '<div class="card"><div class="lbl">System Health</div><div class="val pulse" id="h">--</div></div>'
+            '<div class="card"><div class="lbl">Active Skills</div><div class="val" id="sk">--</div></div>'
+            '<div class="card"><div class="lbl">Recent Traces</div><div class="val" id="tc">--</div></div>'
+            '<div class="card"><div class="lbl">Total Calls</div><div class="val" id="calls">--</div></div>'
+            '<div class="card"><div class="lbl">vSphere VMs</div><div class="val" id="vsvm">--</div></div>'
+            '</div>'
+            + (('<h2 class="sec">Live Metrics</h2><div class="panels">'
+            '<div class="pnl"><div class="pnl-t">Skill Execution</div>'
+            '<iframe src="' + g + '/d-solo/conductor-skills/x?panelId=5&theme=dark&refresh=10s"></iframe></div>'
+            '<div class="pnl"><div class="pnl-t">vSphere Inventory</div>'
+            '<iframe src="' + g + '/d-solo/vsphere-inventory/x?panelId=7&theme=dark&refresh=30s"></iframe></div>'
+            '<div class="pnl"><div class="pnl-t">VM Migration</div>'
+            '<iframe src="' + g + '/d-solo/vm-migration/x?panelId=5&theme=dark&refresh=10s"></iframe></div>'
+            '</div>') if g else '')
+            + '<h2 class="sec">Recent Traces</h2>'
+            '<table><thead><tr><th>Skill</th><th>Status</th><th>Duration</th><th>Time</th></tr></thead>'
+            '<tbody id="tb"><tr><td colspan="4" style="text-align:center;color:#666">Loading...</td></tr></tbody></table>'
+            '<h2 class="sec">API Endpoints</h2><div class="sk" id="sl"></div>'
+            '<footer><p>ZTP Modernization Factory &mdash; Red Hat OpenShift</p>'
+            + (f'<a href="{g}" target="_blank">Grafana</a>' if g else '')
+            + (f'<a href="{l}" target="_blank">Langfuse</a>' if l else '')
+            + '<a href="/api/v1/skills">Skills API</a>'
+            '<a href="/metrics">Metrics</a>'
+            '<a href="/q/health">Health</a></footer></div>'
+            '<script>'
+            'async function F(u){try{let r=await fetch(u);return r.ok?await r.json():null}catch{return null}}'
+            'const SK={"vsphere_discover":"Discover vSphere VMs","guest_analyzer":"Classify VMs by track",'
+            '"mtv_manifest_gen":"Generate MTV migration CRDs","pipeline_trigger":"Fire Tekton PipelineRun",'
+            '"instancetype_gen":"Generate OCP Virt InstanceTypes","oadp_policy":"Create Velero backup schedule",'
+            '"self_heal":"Diagnose failures via LLM","evalops_trace":"Query execution traces"};'
+            'async function R(){'
+            'let h=await F("/q/health");document.getElementById("h").textContent=h&&h.status=="UP"?"UP":"--";'
+            'let s=await F("/api/v1/skills");document.getElementById("sk").textContent=s?s.skills.length:"--";'
+            'let t=await F("/api/v1/traces");'
+            'document.getElementById("tc").textContent=t?t.trace_count:"--";'
+            'let tb=document.getElementById("tb");'
+            'if(t&&t.traces&&t.traces.length>0){'
+            'tb.innerHTML=t.traces.slice(0,8).map(x=>"<tr><td>"+x.name+"</td>"'
+            '+"<td><span class=\\"badge "+(x.status=="ok"||x.status=="Succeeded"?"b-ok":'
+            'x.error?"b-err":"b-warn")+"\\">"+x.status+"</span></td>"'
+            '+"<td>"+(x.duration_ms||0)+"ms</td>"'
+            '+"<td>"+x.timestamp+"</td></tr>").join("")}else{'
+            'tb.innerHTML="<tr><td colspan=4 style=text-align:center;color:#666>No traces yet</td></tr>"}'
+            'try{let m=await(await fetch("/metrics")).text();'
+            'let tot=0;m.split("\\n").forEach(l=>{if(l.startsWith("conductor_skill_calls_total")){'
+            'let v=l.split(" ");tot+=parseInt(v[v.length-1])||0}});'
+            'document.getElementById("calls").textContent=tot||"--";'
+            'let vm=m.match(/vsphere_vm_cpu_total\\s+(\\d+)/);'
+            'let von=m.match(/vsphere_vm_count\\{power_state="POWERED_ON"\\}\\s+(\\d+)/);'
+            'let voff=m.match(/vsphere_vm_count\\{power_state="POWERED_OFF"\\}\\s+(\\d+)/);'
+            'let on=von?parseInt(von[1]):0,off=voff?parseInt(voff[1]):0;'
+            'document.getElementById("vsvm").textContent=(on+off)?(on+off)+" ("+ on+" on)":"--"'
+            '}catch{}'
+            'let sl=document.getElementById("sl");'
+            'sl.innerHTML=Object.entries(SK).map(([k,v])=>'
+            '"<div class=ski><b>"+k+"</b><br><span class=ep>POST /api/v1/skills/"+k+"</span><br>"+v+"</div>").join("")'
+            '}R();setInterval(R,10000)'
+            '</script></body></html>'
+        )
+
+
     # ── HTTP handler ──────────────────────────────────────────────────────────
 
     class Handler(BaseHTTPRequestHandler):
@@ -885,6 +998,20 @@ data:
                 data = (_render_metrics() + _render_vsphere_metrics()).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            elif self.path == "/" or self.path == "/index.html":
+                grafana = os.environ.get("GRAFANA_URL", "")
+                if not grafana:
+                    apps = os.environ.get("APPS_DOMAIN", "")
+                    if apps:
+                        grafana = f"https://grafana-grafana.{apps}"
+                langfuse = LANGFUSE_URL
+                html = _landing_page(grafana, langfuse)
+                data = html.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
