@@ -12,7 +12,8 @@ data:
     import ssl
     import base64
     import re
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import time
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
     from urllib.request import Request, urlopen
     from urllib.error import URLError, HTTPError
 
@@ -25,6 +26,9 @@ data:
     DEFAULT_VSPHERE_PASS = os.environ.get("VSPHERE_PASSWORD", "")
     GRANITE_URL          = os.environ.get("RHOAI_GRANITE_URL", "")
     GRANITE_MODEL        = "granite-33-8b-instruct"
+    CLUSTER1_API_URL     = os.environ.get("CLUSTER1_API_URL", "").rstrip("/")
+    CLUSTER1_TOKEN       = os.environ.get("CLUSTER1_TOKEN", "")
+    MTV_NS               = "openshift-mtv"
 
 
     # ── HTTP helpers ──────────────────────────────────────────────────────────
@@ -243,6 +247,175 @@ data:
         }
 
 
+    # ── Kubernetes API helpers ────────────────────────────────────────────────
+
+    def _k8s_req(url, token, method="GET", body=None):
+        hdrs = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        data = json.dumps(body).encode() if body is not None else None
+        req = Request(url, data=data, headers=hdrs, method=method)
+        with urlopen(req, context=_ssl_ctx(), timeout=30) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+
+    def _k8s_create(base, path, body, token):
+        try:
+            return _k8s_req(base + path, token, method="POST", body=body)
+        except HTTPError as e:
+            if e.code == 409:
+                return {"status": "already exists"}
+            raise
+
+    def _k8s_local_provider(base, token):
+        try:
+            resp = _k8s_req(
+                base + f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/providers",
+                token,
+            )
+            for item in resp.get("items", []):
+                if item.get("spec", {}).get("type") == "openshift":
+                    return item["metadata"]["name"]
+        except Exception:
+            pass
+        return "host"
+
+    def _k8s_wait(base, path, token, condition_type, timeout=120):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                resp = _k8s_req(base + path, token)
+                for cond in resp.get("status", {}).get("conditions", []):
+                    if cond.get("type") == condition_type and cond.get("status") == "True":
+                        return True
+            except Exception:
+                pass
+            time.sleep(5)
+        return False
+
+    def _k8s_poll_migration(base, path, token, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                resp = _k8s_req(base + path, token)
+                conditions = resp.get("status", {}).get("conditions", [])
+                for cond in conditions:
+                    if cond.get("type") == "Succeeded" and cond.get("status") == "True":
+                        migrated = [
+                            v.get("name", "")
+                            for v in resp.get("status", {}).get("vms", [])
+                        ]
+                        return {"status": "Succeeded", "migrated_vms": migrated}
+                    if cond.get("type") == "Failed" and cond.get("status") == "True":
+                        return {"status": "Failed", "detail": cond.get("message", "")}
+            except Exception:
+                pass
+            time.sleep(10)
+        return {"status": "Timeout", "detail": f"Migration did not complete within {timeout}s"}
+
+
+    # ── skill_mtv_manifest_gen ────────────────────────────────────────────────
+
+    def mtv_manifest_gen(vms, target_namespace="mtv-migrated",
+                         network_map=None, storage_map=None,
+                         vsphere_provider="vsphere-source", warm=False, timeout=600):
+        if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
+            return {"status": "error", "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
+
+        if network_map is None:
+            network_map = {"source_id": "dvportgroup-1067", "destination_type": "pod"}
+        if storage_map is None:
+            storage_map = {
+                "source_id": "datastore-1032",
+                "storage_class": "ocs-storagecluster-ceph-rbd",
+                "access_mode": "ReadWriteMany",
+                "volume_mode": "Block",
+            }
+
+        ts = int(time.time())
+        nm_name  = f"ztp-networkmap-{ts}"
+        sm_name  = f"ztp-storagemap-{ts}"
+        plan_name = f"ztp-plan-{ts}"
+        mig_name  = f"ztp-migration-{ts}"
+        base = CLUSTER1_API_URL
+        tok  = CLUSTER1_TOKEN
+        dest = _k8s_local_provider(base, tok)
+
+        provider_ref = {
+            "source":      {"name": vsphere_provider, "namespace": MTV_NS},
+            "destination": {"name": dest,             "namespace": MTV_NS},
+        }
+
+        nm_dest = {"type": network_map.get("destination_type", "Pod")}
+        if network_map.get("destination_name"):
+            nm_dest["name"] = network_map["destination_name"]
+
+        _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/networkmaps",
+            {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "NetworkMap",
+             "metadata": {"name": nm_name, "namespace": MTV_NS,
+                          "labels": {"ztp-modernization-factory": "true"}},
+             "spec": {"map": [{"source": {"id": network_map.get("source_id", "dvportgroup-1067")},
+                               "destination": nm_dest}],
+                      "provider": provider_ref}}, tok)
+
+        _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/storagemaps",
+            {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "StorageMap",
+             "metadata": {"name": sm_name, "namespace": MTV_NS,
+                          "labels": {"ztp-modernization-factory": "true"}},
+             "spec": {"map": [{"source": {"id": storage_map.get("source_id", "datastore-1032")},
+                               "destination": {
+                                   "storageClass": storage_map.get("storage_class", "ocs-storagecluster-ceph-rbd"),
+                                   "accessMode":   storage_map.get("access_mode",   "ReadWriteMany"),
+                                   "volumeMode":   storage_map.get("volume_mode",   "Block"),
+                               }}],
+                      "provider": provider_ref}}, tok)
+
+        # Ensure target namespace exists on the destination cluster
+        _k8s_create(base, "/api/v1/namespaces",
+            {"apiVersion": "v1", "kind": "Namespace",
+             "metadata": {"name": target_namespace,
+                          "labels": {"ztp-modernization-factory": "true"}}}, tok)
+
+        plan_vms = [{"id": v.get("id", ""), "name": v.get("name", "")} for v in vms if v.get("id")]
+        _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/plans",
+            {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "Plan",
+             "metadata": {"name": plan_name, "namespace": MTV_NS,
+                          "labels": {"ztp-modernization-factory": "true"}},
+             "spec": {"provider": provider_ref,
+                      "targetNamespace": target_namespace,
+                      "map": {
+                          "network": {"name": nm_name, "namespace": MTV_NS},
+                          "storage": {"name": sm_name, "namespace": MTV_NS},
+                      },
+                      "vms": plan_vms,
+                      "warm": warm}}, tok)
+
+        _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/migrations",
+            {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "Migration",
+             "metadata": {"name": mig_name, "namespace": MTV_NS,
+                          "labels": {"ztp-modernization-factory": "true"}},
+             "spec": {"plan": {"name": plan_name, "namespace": MTV_NS}}}, tok)
+
+        result = _k8s_poll_migration(
+            base,
+            f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/migrations/{mig_name}",
+            tok, timeout)
+
+        return {
+            "status":           result["status"],
+            "plan_name":        plan_name,
+            "migration_name":   mig_name,
+            "networkmap_name":  nm_name,
+            "storagemap_name":  sm_name,
+            "vm_count":         len(plan_vms),
+            "vms":              [v["name"] for v in plan_vms],
+            "migrated_vms":     result.get("migrated_vms", []),
+            "detail":           result.get("detail", ""),
+        }
+
+
     # ── HTTP handler ──────────────────────────────────────────────────────────
 
     class Handler(BaseHTTPRequestHandler):
@@ -288,6 +461,24 @@ data:
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
 
+            elif self.path == "/api/v1/skills/mtv_manifest_gen":
+                vms = body.get("vms", [])
+                if not vms:
+                    self._reply(400, {"error": "vms array required"})
+                    return
+                try:
+                    self._ok(mtv_manifest_gen(
+                        vms,
+                        target_namespace=body.get("target_namespace", "mtv-migrated"),
+                        network_map=body.get("network_map"),
+                        storage_map=body.get("storage_map"),
+                        vsphere_provider=body.get("vsphere_provider", "vsphere-source"),
+                        warm=body.get("warm", False),
+                        timeout=body.get("timeout", 600),
+                    ))
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
             else:
                 self._ok({"status": "stub", "path": self.path})
 
@@ -308,4 +499,4 @@ data:
 
     if __name__ == "__main__":
         print("Conductor extensions listening on :8080", flush=True)
-        HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
