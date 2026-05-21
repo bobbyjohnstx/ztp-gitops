@@ -19,7 +19,8 @@ spec:
       serviceAccountName: default
       containers:
         - name: conductor
-          image: quay.io/bjohns/conductor-extensions:latest
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command: ["python3", "/app/app.py"]
           ports:
             - containerPort: 8080
               name: http
@@ -41,20 +42,27 @@ spec:
                   optional: true
           readinessProbe:
             httpGet:
-              path: /q/health/ready
+              path: /q/health
               port: 8080
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /q/health/live
+              path: /q/health
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 15
             periodSeconds: 30
           resources:
             requests:
-              cpu: "250m"
-              memory: "512Mi"
+              cpu: "100m"
+              memory: "128Mi"
             limits:
-              cpu: "1"
-              memory: "1Gi"
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: stub-code
+              mountPath: /app
+      volumes:
+        - name: stub-code
+          configMap:
+            name: conductor-stub-code
