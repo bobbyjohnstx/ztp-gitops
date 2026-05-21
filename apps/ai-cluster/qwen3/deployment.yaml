@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-30b
+  namespace: gemma4
+  labels:
+    app: qwen3-30b
+    ztp-modernization-factory: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qwen3-30b
+  template:
+    metadata:
+      labels:
+        app: qwen3-30b
+    spec:
+      containers:
+        - name: vllm
+          image: registry.redhat.io/rhaiis/vllm-cuda-rhel9:3.2.4
+          args:
+            - "--port=8080"
+            - "--model=Qwen/Qwen3-30B-A3B-GPTQ-Int4"
+            - "--served-model-name=qwen3-30b"
+            - "--quantization=gptq_marlin"
+            - "--max-model-len=8192"
+            - "--gpu-memory-utilization=0.90"
+            - "--trust-remote-code"
+          env:
+            - name: TRANSFORMERS_OFFLINE
+              value: "0"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "4"
+              memory: 24Gi
+              nvidia.com/gpu: "1"
+            limits:
+              nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            failureThreshold: 20
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-30b
+  namespace: gemma4
+  labels:
+    app: qwen3-30b
+    ztp-modernization-factory: "true"
+spec:
+  selector:
+    app: qwen3-30b
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: qwen3-30b
+  namespace: gemma4
+  labels:
+    ztp-modernization-factory: "true"
+spec:
+  to:
+    kind: Service
+    name: qwen3-30b
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
