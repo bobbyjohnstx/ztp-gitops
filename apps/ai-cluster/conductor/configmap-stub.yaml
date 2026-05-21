@@ -929,7 +929,7 @@ data:
             '</div>'
             + (('<h2 class="sec">Live Metrics</h2><div class="panels">'
             '<div class="pnl"><div class="pnl-t">Skill Execution</div>'
-            '<iframe src="' + g + '/d-solo/conductor-skills/x?panelId=5&theme=dark&refresh=10s"></iframe></div>'
+            '<iframe src="' + g + '/d-solo/ztp-conductor-skills/x?panelId=5&theme=dark&refresh=10s"></iframe></div>'
             '<div class="pnl"><div class="pnl-t">vSphere Inventory</div>'
             '<iframe src="' + g + '/d-solo/vsphere-inventory/x?panelId=7&theme=dark&refresh=30s"></iframe></div>'
             '<div class="pnl"><div class="pnl-t">VM Migration</div>'
