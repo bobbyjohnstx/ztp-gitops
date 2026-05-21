@@ -1,4 +1,4 @@
-apiVersion: cluster.open-cluster-management.io/v1beta2
+apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   name: rhoai-sno-placement
@@ -21,5 +21,5 @@ spec:
     argoNamespace: openshift-gitops
   placementRef:
     kind: Placement
-    apiVersion: cluster.open-cluster-management.io/v1beta2
+    apiVersion: cluster.open-cluster-management.io/v1beta1
     name: rhoai-sno-placement
