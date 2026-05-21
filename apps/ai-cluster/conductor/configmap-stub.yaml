@@ -19,7 +19,8 @@ data:
 
     HEALTH = {"status": "UP"}
     SKILLS = ["vsphere_discover", "guest_analyzer", "mtv_manifest_gen",
-              "pipeline_trigger", "evalops_trace", "self_heal"]
+              "pipeline_trigger", "evalops_trace", "self_heal",
+              "oadp_policy", "instancetype_gen"]
 
     DEFAULT_VSPHERE_URL  = os.environ.get("VSPHERE_URL", "")
     DEFAULT_VSPHERE_USER = os.environ.get("VSPHERE_USER", "")
@@ -29,6 +30,7 @@ data:
     CLUSTER1_API_URL     = os.environ.get("CLUSTER1_API_URL", "").rstrip("/")
     CLUSTER1_TOKEN       = os.environ.get("CLUSTER1_TOKEN", "")
     MTV_NS               = "openshift-mtv"
+    TEKTON_NS            = "ztp-factory"
     LANGFUSE_URL         = os.environ.get("LANGFUSE_URL", "").rstrip("/")
     LANGFUSE_PK          = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
     LANGFUSE_SK          = os.environ.get("LANGFUSE_SECRET_KEY", "")
@@ -419,6 +421,332 @@ data:
         }
 
 
+    # ── skill_pipeline_trigger ────────────────────────────────────────────────
+
+    _DEMO_PIPELINE_SPEC = {
+        "apiVersion": "tekton.dev/v1", "kind": "Pipeline",
+        "metadata": {"name": "ztp-vm-migration", "namespace": TEKTON_NS,
+                     "labels": {"ztp-modernization-factory": "true"}},
+        "spec": {
+            "params": [
+                {"name": "vm-names", "type": "string"},
+                {"name": "track", "type": "string", "default": "2"},
+                {"name": "target-namespace", "type": "string", "default": TEKTON_NS},
+            ],
+            "tasks": [{"name": "log-vm-info",
+                "params": [{"name": "vm-names", "value": "$(params.vm-names)"},
+                           {"name": "track", "value": "$(params.track)"},
+                           {"name": "target-namespace", "value": "$(params.target-namespace)"}],
+                "taskSpec": {
+                    "params": [{"name": "vm-names"}, {"name": "track"}, {"name": "target-namespace"}],
+                    "steps": [{"name": "log", "image": "registry.access.redhat.com/ubi9-minimal:latest",
+                        "script": "#!/bin/sh\necho 'ZTP Pipeline — Track $(params.track)'\n"
+                                  "echo 'VMs: $(params.vm-names)'\necho 'Done'"}]}}],
+        },
+    }
+
+    def _k8s_poll_pipelinerun(base, path, token, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                resp = _k8s_req(base + path, token)
+                for cond in resp.get("status", {}).get("conditions", []):
+                    if cond.get("type") == "Succeeded":
+                        if cond.get("status") == "True":
+                            return {"status": "Succeeded"}
+                        if cond.get("status") == "False":
+                            return {"status": "Failed",
+                                    "detail": cond.get("message", "")}
+            except Exception:
+                pass
+            time.sleep(5)
+        return {"status": "Timeout",
+                "detail": f"PipelineRun did not complete within {timeout}s"}
+
+    def pipeline_trigger(vms, pipeline_name="ztp-vm-migration",
+                         track="2", target_namespace="ztp-factory", timeout=300):
+        if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
+            return {"status": "error",
+                    "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
+        base = CLUSTER1_API_URL
+        tok  = CLUSTER1_TOKEN
+        vm_names = ",".join(v.get("name", "") for v in vms)
+        run_name = f"ztp-run-{int(time.time())}"
+
+        _k8s_create(base,
+            f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelines",
+            _DEMO_PIPELINE_SPEC, tok)
+
+        _k8s_create(base,
+            f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns",
+            {"apiVersion": "tekton.dev/v1", "kind": "PipelineRun",
+             "metadata": {"name": run_name, "namespace": TEKTON_NS,
+                          "labels": {"ztp-modernization-factory": "true"}},
+             "spec": {"pipelineRef": {"name": pipeline_name},
+                      "params": [
+                          {"name": "vm-names", "value": vm_names},
+                          {"name": "track", "value": str(track)},
+                          {"name": "target-namespace", "value": target_namespace},
+                      ]}}, tok)
+
+        result = _k8s_poll_pipelinerun(
+            base,
+            f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns/{run_name}",
+            tok, timeout)
+
+        return {
+            "status":            result["status"],
+            "pipeline_run_name": run_name,
+            "pipeline_name":     pipeline_name,
+            "track":             track,
+            "vms":               [v.get("name", "") for v in vms],
+            "detail":            result.get("detail", ""),
+        }
+
+
+    # ── skill_instancetype_gen ────────────────────────────────────────────────
+
+    _INSTANCE_CATALOG = {
+        "u1":  {"small": (1, 2), "medium": (2, 4), "large": (4, 8),
+                "xlarge": (8, 16), "2xlarge": (16, 32)},
+        "cx1": {"medium": (1, 2), "large": (2, 4), "xlarge": (4, 8),
+                "2xlarge": (8, 16)},
+        "m1":  {"large": (2, 16), "xlarge": (4, 32), "2xlarge": (8, 64)},
+        "n1":  {"medium": (1, 4), "large": (2, 8), "xlarge": (4, 16)},
+    }
+    _WORKLOAD_SERIES = {
+        "web": "cx1", "database": "m1", "loadbalancer": "n1", "general": "u1",
+    }
+    _OS_PREFERENCE = [
+        (r"WINDOWS_SERVER_2022|WINDOWS_SERVER_2021", "windows.2k22"),
+        (r"WINDOWS",       "windows.11"),
+        (r"CENTOS",        "centos.stream9"),
+        (r"RHEL_10|RHEL10","rhel.10"),
+        (r"RHEL",          "rhel.9"),
+        (r"FEDORA",        "fedora"),
+    ]
+
+    def _select_instance_type(cpu_count, memory_gb, workload_type="general"):
+        series = _WORKLOAD_SERIES.get(workload_type, "u1")
+        catalog = _INSTANCE_CATALOG.get(series, _INSTANCE_CATALOG["u1"])
+        for size_name, (cpus, mem) in sorted(catalog.items(), key=lambda x: x[1]):
+            if cpus >= cpu_count and mem >= memory_gb:
+                return f"{series}.{size_name}", cpus, mem
+        for size_name, (cpus, mem) in sorted(
+                _INSTANCE_CATALOG["u1"].items(), key=lambda x: x[1]):
+            if cpus >= cpu_count and mem >= memory_gb:
+                return f"u1.{size_name}", cpus, mem
+        return "u1.2xlarge", 16, 32
+
+    def _select_preference(guest_os):
+        for pattern, pref in _OS_PREFERENCE:
+            if re.search(pattern, guest_os or "", re.IGNORECASE):
+                return pref
+        return "rhel.9"
+
+    def instancetype_gen(vms, namespace="ztp-factory"):
+        if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
+            return {"status": "error",
+                    "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
+        base = CLUSTER1_API_URL
+        tok  = CLUSTER1_TOKEN
+        results = []
+        for vm in vms:
+            cpu = vm.get("cpu_count", 2)
+            mem = vm.get("memory_gb", 4)
+            wt  = vm.get("workload_type", "general")
+            type_name, _, _ = _select_instance_type(cpu, mem, wt)
+            pref_name = _select_preference(vm.get("guest_os", ""))
+            it_name = f"ztp-{vm.get('name', 'vm')}-type"
+            pr_name = f"ztp-{vm.get('name', 'vm')}-pref"
+            ns = vm.get("namespace", namespace)
+            _k8s_create(base,
+                f"/apis/instancetype.kubevirt.io/v1beta1/namespaces/{ns}/virtualmachineinstancetypes",
+                {"apiVersion": "instancetype.kubevirt.io/v1beta1",
+                 "kind": "VirtualMachineInstancetype",
+                 "metadata": {"name": it_name, "namespace": ns,
+                              "labels": {"ztp-modernization-factory": "true"}},
+                 "spec": {"cpu": {"guest": cpu},
+                          "memory": {"guest": f"{int(mem)}Gi"}}}, tok)
+            _k8s_create(base,
+                f"/apis/instancetype.kubevirt.io/v1beta1/namespaces/{ns}/virtualmachinepreferences",
+                {"apiVersion": "instancetype.kubevirt.io/v1beta1",
+                 "kind": "VirtualMachinePreference",
+                 "metadata": {"name": pr_name, "namespace": ns,
+                              "labels": {"ztp-modernization-factory": "true"}},
+                 "spec": {"preferredStorageClassName": "ocs-storagecluster-ceph-rbd"}}, tok)
+            results.append({"vm_name": vm.get("name", ""),
+                            "type_name": type_name, "instance_type": it_name,
+                            "preference_name": pr_name,
+                            "os_preference": pref_name})
+        return {"status": "ok", "instance_types": results}
+
+
+    # ── skill_oadp_policy ─────────────────────────────────────────────────────
+
+    def oadp_policy(vms, schedule="0 2 * * *", ttl="720h"):
+        if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
+            return {"status": "error",
+                    "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
+        base = CLUSTER1_API_URL
+        tok  = CLUSTER1_TOKEN
+        namespaces = list({v.get("namespace", "mtv-migrated") for v in vms})
+        sched_name = f"ztp-backup-{int(time.time())}"
+        _k8s_create(base,
+            "/apis/velero.io/v1/namespaces/openshift-adp/schedules",
+            {"apiVersion": "velero.io/v1", "kind": "Schedule",
+             "metadata": {"name": sched_name, "namespace": "openshift-adp",
+                          "labels": {"ztp-modernization-factory": "true"}},
+             "spec": {"schedule": schedule,
+                      "template": {
+                          "ttl": ttl,
+                          "includedNamespaces": namespaces,
+                          "includedResources": [
+                              "virtualmachines", "virtualmachineinstances",
+                              "datavolumes", "persistentvolumeclaims"],
+                      }}}, tok)
+        return {"status": "ok", "schedule_name": sched_name,
+                "namespaces": namespaces,
+                "vms_covered": [v.get("name", "") for v in vms]}
+
+
+    # ── skill_self_heal ───────────────────────────────────────────────────────
+
+    def _heuristic_classify(error_message):
+        msg = (error_message or "").lower()
+        if "timeout" in msg or "timed out" in msg:
+            return "transient", "low"
+        if "401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg:
+            return "auth", "high"
+        if "404" in msg or "not found" in msg:
+            return "config", "medium"
+        if "quota" in msg or "limit" in msg or "insufficient" in msg:
+            return "resource", "high"
+        if "connection" in msg or "refused" in msg or "reset" in msg:
+            return "transient", "medium"
+        return "permanent", "medium"
+
+    def self_heal(skill_name, error_message, context=None):
+        classification, severity = _heuristic_classify(error_message)
+        if not GRANITE_URL:
+            return {
+                "status": "ok", "classifier": "heuristic",
+                "skill_name": skill_name,
+                "classification": classification, "severity": severity,
+                "remediation_steps": [f"Check {classification} issue for {skill_name}"],
+                "retry_suggestion": None,
+            }
+        prompt = (
+            "You are an OpenShift migration expert diagnosing a skill failure.\n\n"
+            f"Skill: {skill_name}\n"
+            f"Error: {error_message}\n"
+            f"Context: {json.dumps(context or {})}\n\n"
+            "Respond with ONLY a JSON object:\n"
+            '{"classification": "transient|permanent|auth|config|resource",'
+            ' "severity": "low|medium|high|critical",'
+            ' "remediation_steps": ["step1", "step2"],'
+            ' "retry_suggestion": {"wait_seconds": 30, "modified_params": {}} or null}'
+        )
+        try:
+            resp = _json_req(
+                GRANITE_URL.rstrip("/") + "/v1/chat/completions",
+                payload={
+                    "model":       GRANITE_MODEL,
+                    "messages":    [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens":  256,
+                },
+            )
+            content = resp["choices"][0]["message"]["content"].strip()
+            m = re.search(r'\{.*\}', content, re.DOTALL)
+            if m:
+                parsed = json.loads(m.group(0))
+                parsed["status"] = "ok"
+                parsed["classifier"] = "granite"
+                parsed["skill_name"] = skill_name
+                return parsed
+        except Exception:
+            pass
+        return {
+            "status": "ok", "classifier": "heuristic",
+            "skill_name": skill_name,
+            "classification": classification, "severity": severity,
+            "remediation_steps": [f"Check {classification} issue for {skill_name}"],
+            "retry_suggestion": None,
+        }
+
+
+    # ── /api/v1/migrate — end-to-end orchestration ───────────────────────────
+
+    def migrate(vs_url, vs_user, vs_pass, options=None):
+        import uuid
+        opts = options or {}
+        target_ns = opts.get("target_namespace", "mtv-migrated")
+        granite = opts.get("granite_url", GRANITE_URL)
+        timeout = opts.get("timeout", 60)
+        steps = {}
+
+        try:
+            inventory = vsphere_discover(vs_url, vs_user, vs_pass)
+            steps["discover"] = {"status": inventory.get("status", "error"),
+                                 "vm_count": inventory.get("vm_count", 0)}
+        except Exception as e:
+            heal = self_heal("vsphere_discover", str(e))
+            return {"status": "error", "step_failed": "discover",
+                    "error": str(e), "self_heal": heal, "steps": steps}
+
+        vms = inventory.get("vms", [])
+        if not vms:
+            return {"status": "ok", "vm_count": 0,
+                    "message": "No VMs found", "steps": steps}
+
+        try:
+            classified = guest_analyzer(vms, granite_url=granite)
+            steps["classify"] = {"status": classified.get("status", "error"),
+                                 "summary": classified.get("summary", {})}
+        except Exception as e:
+            steps["classify"] = {"status": "error", "error": str(e)}
+            classified = {"classifications": [
+                {"vm_id": v.get("id"), "vm_name": v.get("name"),
+                 "track": 1, "reason": "fallback"} for v in vms]}
+
+        track_1 = [c for c in classified.get("classifications", []) if c.get("track") == 1]
+        track_23 = [c for c in classified.get("classifications", []) if c.get("track") in (2, 3)]
+
+        if track_1:
+            t1_vms = [{"id": c["vm_id"], "name": c["vm_name"]} for c in track_1]
+            try:
+                t1_result = mtv_manifest_gen(t1_vms, target_namespace=target_ns,
+                                             timeout=timeout)
+                steps["track_1"] = {"status": t1_result.get("status"),
+                                    "plan": t1_result.get("plan_name"),
+                                    "vms": [c["vm_name"] for c in track_1]}
+            except Exception as e:
+                steps["track_1"] = {"status": "error", "error": str(e)}
+
+        if track_23:
+            t23_vms = [{"id": c.get("vm_id", ""), "name": c["vm_name"]} for c in track_23]
+            tracks = {c["vm_name"]: c.get("track", 2) for c in track_23}
+            try:
+                t23_result = pipeline_trigger(
+                    t23_vms, track=str(track_23[0].get("track", 2)),
+                    target_namespace=target_ns, timeout=timeout)
+                steps["track_2_3"] = {"status": t23_result.get("status"),
+                                      "run": t23_result.get("pipeline_run_name"),
+                                      "vms": [c["vm_name"] for c in track_23]}
+            except Exception as e:
+                steps["track_2_3"] = {"status": "error", "error": str(e)}
+
+        all_ok = all(s.get("status") in ("ok", "Timeout", "Succeeded")
+                     for s in steps.values())
+        return {
+            "status":   "ok" if all_ok else "partial",
+            "vm_count": len(vms),
+            "track_summary": classified.get("summary", {}),
+            "steps":    steps,
+        }
+
+
     # ── Langfuse tracing helpers ─────────────────────────────────────────────
 
     _TRACE_BUFFER = []
@@ -555,6 +883,85 @@ data:
                         warm=body.get("warm", False),
                         timeout=body.get("timeout", 600),
                     )
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/pipeline_trigger":
+                vms = body.get("vms", [])
+                if not vms:
+                    self._reply(400, {"error": "vms array required"})
+                    return
+                try:
+                    inputs = {"vm_count": len(vms), "track": body.get("track", "2")}
+                    result = _trace_skill("pipeline_trigger", inputs,
+                        pipeline_trigger, vms,
+                        pipeline_name=body.get("pipeline_name", "ztp-vm-migration"),
+                        track=body.get("track", "2"),
+                        target_namespace=body.get("target_namespace", "ztp-factory"),
+                        timeout=body.get("timeout", 300))
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/instancetype_gen":
+                vms = body.get("vms", [])
+                if not vms:
+                    self._reply(400, {"error": "vms array required"})
+                    return
+                try:
+                    inputs = {"vm_count": len(vms)}
+                    result = _trace_skill("instancetype_gen", inputs,
+                        instancetype_gen, vms,
+                        namespace=body.get("namespace", "ztp-factory"))
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/oadp_policy":
+                vms = body.get("vms", [])
+                if not vms:
+                    self._reply(400, {"error": "vms array required"})
+                    return
+                try:
+                    inputs = {"vm_count": len(vms)}
+                    result = _trace_skill("oadp_policy", inputs,
+                        oadp_policy, vms,
+                        schedule=body.get("schedule", "0 2 * * *"),
+                        ttl=body.get("ttl", "720h"))
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/self_heal":
+                skill_name = body.get("skill_name", "")
+                error_msg = body.get("error_message", "")
+                if not skill_name or not error_msg:
+                    self._reply(400, {"error": "skill_name and error_message required"})
+                    return
+                try:
+                    inputs = {"skill_name": skill_name}
+                    result = _trace_skill("self_heal", inputs,
+                        self_heal, skill_name, error_msg,
+                        context=body.get("context"))
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/migrate":
+                vs_url  = body.get("vsphere_url",      DEFAULT_VSPHERE_URL)
+                vs_user = body.get("vsphere_user",     DEFAULT_VSPHERE_USER)
+                vs_pass = body.get("vsphere_password", DEFAULT_VSPHERE_PASS)
+                if not all([vs_url, vs_user, vs_pass]):
+                    self._reply(400, {
+                        "error": "vsphere_url, vsphere_user, vsphere_password required"
+                    })
+                    return
+                try:
+                    inputs = {"vsphere_url": vs_url, "vsphere_user": vs_user}
+                    result = _trace_skill("migrate", inputs,
+                        migrate, vs_url, vs_user, vs_pass,
+                        options=body.get("options"))
                     self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})

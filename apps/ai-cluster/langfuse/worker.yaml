@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: langfuse
+  labels:
+    app: langfuse-worker
+    ztp-modernization-factory: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: docker.io/postgres:15
+          command:
+            - sh
+            - -c
+            - until pg_isready -h langfuse-postgres.langfuse.svc.cluster.local -U langfuse; do sleep 2; done
+        - name: wait-for-clickhouse
+          image: docker.io/clickhouse/clickhouse-server:24-alpine
+          command:
+            - sh
+            - -c
+            - until wget -q -O /dev/null http://langfuse-clickhouse.langfuse.svc.cluster.local:8123/ping; do sleep 2; done
+      containers:
+        - name: langfuse-worker
+          image: ghcr.io/langfuse/langfuse-worker:3
+          ports:
+            - containerPort: 3030
+              name: http
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: database_url
+            - name: SALT
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: salt
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-worker-secret
+                  key: encryption_key
+            - name: CLICKHOUSE_URL
+              value: "http://langfuse-clickhouse.langfuse.svc.cluster.local:8123"
+            - name: CLICKHOUSE_MIGRATION_URL
+              value: "clickhouse://langfuse-clickhouse.langfuse.svc.cluster.local:9000"
+            - name: CLICKHOUSE_USER
+              value: "default"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-secret
+                  key: password
+            - name: REDIS_CONNECTION_STRING
+              value: "redis://langfuse-redis.langfuse.svc.cluster.local:6379"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+              value: "langfuse-events"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+              value: "us-east-1"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+              value: "http://langfuse-minio.langfuse.svc.cluster.local:9000"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+              value: "true"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: access_key
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-minio-secret
+                  key: secret_key
+            - name: TELEMETRY_ENABLED
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3030
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
