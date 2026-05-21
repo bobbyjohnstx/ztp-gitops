@@ -30,3 +30,9 @@ spec:
       namespace: conductor-ai
       jsonPointers:
         - /data
+    - group: ""
+      kind: ConfigMap
+      name: conductor-stub-code
+      namespace: conductor-ai
+      jsonPointers:
+        - /data
