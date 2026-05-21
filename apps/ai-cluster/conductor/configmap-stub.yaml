@@ -11,6 +11,7 @@ data:
     import os
     import ssl
     import base64
+    import re
     from http.server import HTTPServer, BaseHTTPRequestHandler
     from urllib.request import Request, urlopen
     from urllib.error import URLError, HTTPError
@@ -22,15 +23,32 @@ data:
     DEFAULT_VSPHERE_URL  = os.environ.get("VSPHERE_URL", "")
     DEFAULT_VSPHERE_USER = os.environ.get("VSPHERE_USER", "")
     DEFAULT_VSPHERE_PASS = os.environ.get("VSPHERE_PASSWORD", "")
+    GRANITE_URL          = os.environ.get("RHOAI_GRANITE_URL", "")
+    GRANITE_MODEL        = "granite-33-8b-instruct"
 
 
-    # ── vSphere REST helpers ──────────────────────────────────────────────────
+    # ── HTTP helpers ──────────────────────────────────────────────────────────
 
     def _ssl_ctx():
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         return ctx
+
+    def _json_req(url, payload=None, headers=None, method=None):
+        hdrs = {"Accept": "application/json", "Content-Type": "application/json"}
+        if headers:
+            hdrs.update(headers)
+        data = json.dumps(payload).encode() if payload is not None else None
+        if method is None:
+            method = "POST" if data else "GET"
+        req = Request(url, data=data, headers=hdrs, method=method)
+        with urlopen(req, context=_ssl_ctx(), timeout=30) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+
+
+    # ── vSphere REST helpers ──────────────────────────────────────────────────
 
     def _vs_req(base, path, method="GET", token=None, user=None, pwd=None):
         url = base.rstrip("/") + path
@@ -47,17 +65,12 @@ data:
             return json.loads(raw) if raw else None
 
     def vsphere_discover(url, user, pwd):
-        # 1. Authenticate — POST /api/session → quoted session-token string
         tok_raw = _vs_req(url, "/api/session", method="POST", user=user, pwd=pwd)
         token = tok_raw.strip('"') if isinstance(tok_raw, str) else tok_raw
-
         try:
-            # 2. List VMs / networks / datastores
             vms_raw        = _vs_req(url, "/api/vcenter/vm",        token=token) or []
             networks_raw   = _vs_req(url, "/api/vcenter/network",   token=token) or []
             datastores_raw = _vs_req(url, "/api/vcenter/datastore", token=token) or []
-
-            # 3. Enrich each VM (cap at 30 for demo latency)
             vms = []
             for vm in vms_raw[:30]:
                 vm_id = vm.get("vm", "")
@@ -84,9 +97,8 @@ data:
                         for n in det.get("nics", {}).values()
                     ]
                 except Exception:
-                    pass  # detail enrichment is best-effort
+                    pass
                 vms.append(entry)
-
             networks = [
                 {"id": n.get("network", ""), "name": n.get("name", ""), "type": n.get("type", "")}
                 for n in networks_raw
@@ -102,17 +114,133 @@ data:
                 for d in datastores_raw
             ]
             return {
-                "status":      "ok",
-                "vm_count":    len(vms),
-                "vms":         vms,
-                "networks":    networks,
-                "datastores":  datastores,
+                "status":     "ok",
+                "vm_count":   len(vms),
+                "vms":        vms,
+                "networks":   networks,
+                "datastores": datastores,
             }
         finally:
             try:
                 _vs_req(url, "/api/session", method="DELETE", token=token)
             except Exception:
                 pass
+
+
+    # ── skill_guest_analyzer ──────────────────────────────────────────────────
+
+    _TRACK_RULES = [
+        # (pattern in name or guest_os, track, reason)
+        (r"windows|WINDOWS",               1, "Windows OS — lift-and-shift via MTV"),
+        (r"haproxy|lb[-_]|loadbal",        1, "Network appliance — opaque, migrate as-is"),
+        (r"[-_]tpl\b|template",             0, "Template — skip migration"),
+        (r"database|db[-_]|mysql|postgres|oracle|mssql", 1, "Database — stateful, Track 1 via MTV"),
+        (r"java|spring|quarkus|jboss|wildfly|eap",       3, "Java workload — modernize to Quarkus"),
+        (r"web|app|service|api|micro",     2, "Web/app workload — replatform to container"),
+    ]
+
+    def _rule_classify(vm):
+        text = (vm.get("name", "") + " " + vm.get("guest_os", "")).lower()
+        for pattern, track, reason in _TRACK_RULES:
+            if re.search(pattern, text, re.IGNORECASE):
+                return track, reason
+        return None, None
+
+    def _llm_classify(vms, granite_url):
+        vm_lines = "\n".join(
+            f"- {v['name']}: {v.get('guest_os','unknown')} | "
+            f"{v.get('cpu_count',0)} vCPU | {v.get('memory_gb',0)}GB RAM | "
+            f"{v.get('disk_gb',0)}GB disk | {v.get('power_state','')}"
+            for v in vms
+        )
+        prompt = (
+            "You are a Red Hat migration expert. Classify each VM into a migration track.\n\n"
+            "Tracks:\n"
+            "- Track 1 (Virtualize): Windows VMs, network appliances, databases"
+            " — migrate as-is to OCP Virt via MTV\n"
+            "- Track 2 (Replatform): Linux apps (web, APIs, services)"
+            " — containerize via Shipwright/S2I\n"
+            "- Track 3 (Modernize): Java apps — refactor to Quarkus microservices\n"
+            "- Track 0 (Skip): Templates, infrastructure VMs not suitable for migration\n\n"
+            "VMs to classify:\n"
+            f"{vm_lines}\n\n"
+            "Respond with ONLY a JSON array, no explanation:\n"
+            '[{"name": "vm-name", "track": 1, "reason": "one sentence"}]'
+        )
+
+        resp = _json_req(
+            granite_url.rstrip("/") + "/v1/chat/completions",
+            payload={
+                "model":       GRANITE_MODEL,
+                "messages":    [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens":  512,
+            },
+        )
+        content = resp["choices"][0]["message"]["content"].strip()
+        # Extract JSON array from response (model may add prose)
+        m = re.search(r'\[.*\]', content, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+        return []
+
+    def guest_analyzer(vms, granite_url=None):
+        results = []
+        llm_queue = []
+
+        for vm in vms:
+            track, reason = _rule_classify(vm)
+            if track is not None:
+                results.append({
+                    "vm_id":      vm.get("id", ""),
+                    "vm_name":    vm.get("name", ""),
+                    "track":      track,
+                    "reason":     reason,
+                    "classifier": "rules",
+                })
+            else:
+                llm_queue.append(vm)
+
+        # LLM classification for ambiguous VMs
+        if llm_queue and granite_url:
+            try:
+                llm_results = _llm_classify(llm_queue, granite_url)
+                name_map = {v["name"]: v for v in llm_queue}
+                for lr in llm_results:
+                    vm = name_map.get(lr.get("name", ""), {})
+                    results.append({
+                        "vm_id":      vm.get("id", ""),
+                        "vm_name":    lr.get("name", ""),
+                        "track":      lr.get("track", 1),
+                        "reason":     lr.get("reason", "LLM classification"),
+                        "classifier": "granite",
+                    })
+            except Exception as e:
+                # Fall back to Track 1 for unclassified VMs
+                for vm in llm_queue:
+                    results.append({
+                        "vm_id":      vm.get("id", ""),
+                        "vm_name":    vm.get("name", ""),
+                        "track":      1,
+                        "reason":     f"LLM unavailable ({e}) — defaulting to Track 1",
+                        "classifier": "fallback",
+                    })
+
+        track_summary = {1: 0, 2: 0, 3: 0, 0: 0}
+        for r in results:
+            track_summary[r["track"]] = track_summary.get(r["track"], 0) + 1
+
+        return {
+            "status":        "ok",
+            "vm_count":      len(results),
+            "classifications": results,
+            "summary": {
+                "track_1_virtualize": track_summary[1],
+                "track_2_replatform": track_summary[2],
+                "track_3_modernize":  track_summary[3],
+                "skip":               track_summary[0],
+            },
+        }
 
 
     # ── HTTP handler ──────────────────────────────────────────────────────────
@@ -148,6 +276,18 @@ data:
                     self._reply(502, {"error": f"vSphere API error: {e}"})
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/guest_analyzer":
+                vms = body.get("vms", [])
+                if not vms:
+                    self._reply(400, {"error": "vms array required"})
+                    return
+                granite = body.get("granite_url", GRANITE_URL)
+                try:
+                    self._ok(guest_analyzer(vms, granite_url=granite))
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
             else:
                 self._ok({"status": "stub", "path": self.path})
 
