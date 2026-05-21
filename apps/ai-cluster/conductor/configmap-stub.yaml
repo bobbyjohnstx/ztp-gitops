@@ -36,6 +36,15 @@ data:
     LANGFUSE_SK          = os.environ.get("LANGFUSE_SECRET_KEY", "")
 
 
+    # ── Input sanitization ─────────────────────────────────────────────────
+
+    def _sanitize(text, max_len=120):
+        t = re.sub(r'[^\x20-\x7E]', '', str(text or ''))[:max_len]
+        t = re.sub(r'(?i)(ignore|disregard|forget|override)\s+(all|previous|above|prior|system)', '[FILTERED]', t)
+        t = re.sub(r'(?i)(you are now|act as|pretend|new instructions|system prompt)', '[FILTERED]', t)
+        return t
+
+
     # ── HTTP helpers ──────────────────────────────────────────────────────────
 
     def _ssl_ctx():
@@ -157,9 +166,9 @@ data:
 
     def _llm_classify(vms, granite_url):
         vm_lines = "\n".join(
-            f"- {v['name']}: {v.get('guest_os','unknown')} | "
+            f"- {_sanitize(v['name'], 60)}: {_sanitize(v.get('guest_os','unknown'), 40)} | "
             f"{v.get('cpu_count',0)} vCPU | {v.get('memory_gb',0)}GB RAM | "
-            f"{v.get('disk_gb',0)}GB disk | {v.get('power_state','')}"
+            f"{v.get('disk_gb',0)}GB disk | {_sanitize(v.get('power_state',''), 20)}"
             for v in vms
         )
         prompt = (
@@ -636,11 +645,14 @@ data:
                 "remediation_steps": [f"Check {classification} issue for {skill_name}"],
                 "retry_suggestion": None,
             }
+        safe_skill = _sanitize(skill_name, 40)
+        safe_error = _sanitize(error_message, 200)
+        safe_ctx = _sanitize(json.dumps(context or {}), 300)
         prompt = (
             "You are an OpenShift migration expert diagnosing a skill failure.\n\n"
-            f"Skill: {skill_name}\n"
-            f"Error: {error_message}\n"
-            f"Context: {json.dumps(context or {})}\n\n"
+            f"Skill: {safe_skill}\n"
+            f"Error: {safe_error}\n"
+            f"Context: {safe_ctx}\n\n"
             "Respond with ONLY a JSON object:\n"
             '{"classification": "transient|permanent|auth|config|resource",'
             ' "severity": "low|medium|high|critical",'
