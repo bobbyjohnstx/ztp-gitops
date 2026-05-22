@@ -21,7 +21,8 @@ data:
     HEALTH = {"status": "UP"}
     SKILLS = ["vsphere_discover", "guest_analyzer", "mtv_manifest_gen",
               "pipeline_trigger", "evalops_trace", "self_heal",
-              "oadp_policy", "instancetype_gen", "migration_validator"]
+              "oadp_policy", "instancetype_gen", "migration_validator",
+              "red_team"]
 
     DEFAULT_VSPHERE_URL  = os.environ.get("VSPHERE_URL", "")
     DEFAULT_VSPHERE_USER = os.environ.get("VSPHERE_USER", "")
@@ -844,6 +845,120 @@ data:
         }
 
 
+    # ── red_team — Garak LLM red-team scan ──────────────────────────────────
+
+    def red_team(probes=None, generations=5):
+        probes = probes or "promptinject.HijackHateHumansMini,dan.Dan_11_0,encoding.InjectBase64"
+        ns  = "conductor-ai"
+        k8s = "https://kubernetes.default.svc"
+        sa_tok_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+        try:
+            with open(sa_tok_path) as fh:
+                tok = fh.read().strip()
+        except Exception as e:
+            return {"status": "error", "error": f"in-cluster SA token unavailable: {e}"}
+
+        ctx = _ssl_ctx(verify=False)
+
+        # Delete existing job (idempotent re-run)
+        try:
+            _k8s_req(f"{k8s}/apis/batch/v1/namespaces/{ns}/jobs/garak-red-team",
+                     tok, method="DELETE", body={"propagationPolicy": "Foreground"})
+        except Exception:
+            pass
+        import time as _t
+        _t.sleep(5)
+
+        job = {
+            "apiVersion": "batch/v1", "kind": "Job",
+            "metadata": {"name": "garak-red-team", "namespace": ns,
+                         "labels": {"app": "garak"}},
+            "spec": {
+                "ttlSecondsAfterFinished": 7200, "backoffLimit": 0,
+                "template": {
+                    "metadata": {"labels": {"app": "garak"}},
+                    "spec": {
+                        "restartPolicy": "Never",
+                        "containers": [{
+                            "name": "garak",
+                            "image": "python:3.11-slim",
+                            "command": ["python", "/scripts/run.py"],
+                            "env": [
+                                {"name": "VLLM_BASE_URL",      "value": GRANITE_URL},
+                                {"name": "RHOAI_MODEL_NAME",   "value": GRANITE_MODEL},
+                                {"name": "GARAK_PROBES",       "value": probes},
+                                {"name": "GARAK_GENERATIONS",  "value": str(generations)},
+                            ],
+                            "volumeMounts": [{"name": "scripts", "mountPath": "/scripts"}],
+                            "resources": {
+                                "requests": {"cpu": "500m", "memory": "1Gi"},
+                                "limits":   {"cpu": "2",    "memory": "2Gi"},
+                            },
+                        }],
+                        "volumes": [{"name": "scripts",
+                                     "configMap": {"name": "garak-scan"}}],
+                    },
+                },
+            },
+        }
+
+        try:
+            _k8s_create(f"{k8s}/apis/batch/v1/namespaces/{ns}/jobs", tok, job)
+        except Exception as e:
+            return {"status": "error", "error": f"job create failed: {e}"}
+
+        # Poll up to 10 min for completion
+        deadline = _t.time() + 600
+        while _t.time() < deadline:
+            _t.sleep(15)
+            try:
+                jstatus = _k8s_req(
+                    f"{k8s}/apis/batch/v1/namespaces/{ns}/jobs/garak-red-team", tok)
+                conds = jstatus.get("status", {}).get("conditions", [])
+                if any(c["type"] == "Complete" and c["status"] == "True" for c in conds):
+                    break
+                if any(c["type"] == "Failed" and c["status"] == "True" for c in conds):
+                    return {"status": "error", "error": "garak job failed",
+                            "job_status": jstatus.get("status")}
+            except Exception:
+                pass
+        else:
+            return {"status": "error", "error": "garak job timed out after 10 min"}
+
+        # Fetch pod logs
+        logs = ""
+        try:
+            pods = _k8s_req(
+                f"{k8s}/api/v1/namespaces/{ns}/pods?labelSelector=app%3Dgarak", tok)
+            pod_name = pods["items"][0]["metadata"]["name"] if pods.get("items") else None
+            if pod_name:
+                req = urllib.request.Request(
+                    f"{k8s}/api/v1/namespaces/{ns}/pods/{pod_name}/log",
+                    headers={"Authorization": f"Bearer {tok}"})
+                with urllib.request.urlopen(req, context=ctx, timeout=30) as r:
+                    logs = r.read().decode(errors="replace")
+        except Exception as e:
+            logs = f"(log fetch error: {e})"
+
+        # Parse summary line from logs
+        total = passed = failed = 0
+        for line in logs.splitlines():
+            if "Total:" in line and "Passed:" in line:
+                import re as _re
+                m = _re.search(r"Total:\s*(\d+).*Passed:\s*(\d+).*Vulnerable:\s*(\d+)", line)
+                if m:
+                    total, passed, failed = int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+        return {
+            "status": "ok",
+            "probes": probes,
+            "generations": generations,
+            "model": GRANITE_MODEL,
+            "summary": {"total": total, "passed": passed, "vulnerable": failed},
+            "logs": logs[-4000:] if len(logs) > 4000 else logs,
+        }
+
+
     # ── /api/v1/migrate — end-to-end orchestration ───────────────────────────
 
     def migrate(vs_url, vs_user, vs_pass, options=None):
@@ -1105,7 +1220,8 @@ data:
             'const SK={"vsphere_discover":"Discover vSphere VMs","guest_analyzer":"Classify VMs by track",'
             '"mtv_manifest_gen":"Generate MTV migration CRDs","pipeline_trigger":"Fire Tekton PipelineRun",'
             '"instancetype_gen":"Generate OCP Virt InstanceTypes","oadp_policy":"Create Velero backup schedule",'
-            '"self_heal":"Diagnose failures via LLM","evalops_trace":"Query execution traces"};'
+            '"self_heal":"Diagnose failures via LLM","evalops_trace":"Query execution traces",'
+            '"red_team":"Garak LLM red-team scan (prompt injection, DAN, encoding)"};'
             'async function R(){'
             'let h=await F("/q/health");document.getElementById("h").textContent=h&&h.status=="UP"?"UP":"--";'
             'let s=await F("/api/v1/skills");document.getElementById("sk").textContent=s?s.skills.length:"--";'
@@ -1303,6 +1419,17 @@ data:
                         namespace=ns,
                         vm_names=body.get("vms"),
                         port_scan=body.get("port_scan", False))
+                    self._ok(result)
+                except Exception as e:
+                    self._reply(500, {"error": str(e)})
+
+            elif self.path == "/api/v1/skills/red_team":
+                try:
+                    inputs = {"probes": body.get("probes"), "generations": body.get("generations", 5)}
+                    result = _trace_skill("red_team", inputs,
+                        red_team,
+                        probes=body.get("probes"),
+                        generations=body.get("generations", 5))
                     self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})

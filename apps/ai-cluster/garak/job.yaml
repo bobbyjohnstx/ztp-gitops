@@ -1,58 +1,114 @@
-apiVersion: batch/v1
-kind: Job
+# Garak Red-Team Scan — on-demand Job targeting the active vLLM endpoint.
+# Triggered by: POST /api/v1/skills/red_team  (conductor creates job via in-cluster API)
+#          or:  oc delete job garak-red-team -n conductor-ai --ignore-not-found
+#               oc apply -f gitops/apps/ai-cluster/garak/job.yaml
+#               oc logs -f job/garak-red-team -n conductor-ai
+apiVersion: v1
+kind: ConfigMap
 metadata:
   name: garak-scan
   namespace: conductor-ai
   labels:
     ztp-modernization-factory: "true"
-    app: garak-scan
+data:
+  run.py: |
+    #!/usr/bin/env python3
+    """ZTP Garak red-team — installs garak and scans the active vLLM endpoint."""
+    import os, subprocess, sys, glob, json
+
+    endpoint    = os.environ.get("VLLM_BASE_URL", "http://qwen3-30b.gemma4.svc.cluster.local:8080")
+    model       = os.environ.get("RHOAI_MODEL_NAME", "qwen3-30b")
+    probes      = os.environ.get("GARAK_PROBES",
+                      "promptinject.HijackHateHumansMini,dan.Dan_11_0,encoding.InjectBase64")
+    generations = os.environ.get("GARAK_GENERATIONS", "5")
+
+    print(f"=== ZTP Garak Red-Team Scan ===")
+    print(f"Target:      {endpoint}/v1")
+    print(f"Model:       {model}")
+    print(f"Probes:      {probes}")
+    print(f"Generations: {generations}")
+    print()
+
+    subprocess.run([sys.executable, "-m", "pip", "install", "garak", "-q"], check=True)
+
+    env = os.environ.copy()
+    env["OPENAI_API_BASE"] = f"{endpoint}/v1"
+    env["OPENAI_API_KEY"]  = "unused"
+
+    result = subprocess.run([
+        sys.executable, "-m", "garak",
+        "--model_type",  "openai",
+        "--model_name",  model,
+        "--probes",      probes,
+        "--generations", generations,
+        "--report_prefix", "/tmp/garak",
+    ], env=env)
+
+    reports = glob.glob("/tmp/garak.*.report.jsonl")
+    if reports:
+        passed = failed = total = 0
+        with open(reports[0]) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                    if rec.get("entry_type") == "eval":
+                        total += 1
+                        if rec.get("passed"):
+                            passed += 1
+                        else:
+                            failed += 1
+                except Exception:
+                    pass
+        print(f"\n=== SCAN SUMMARY ===")
+        print(f"Total: {total} | Passed: {passed} | Vulnerable: {failed}")
+        with open(reports[0]) as fh:
+            for line in fh:
+                print(line, end="")
+    sys.exit(result.returncode)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: garak-red-team
+  namespace: conductor-ai
+  labels:
+    app: garak
+    ztp-modernization-factory: "true"
+  annotations:
+    description: "Garak LLM red-team scan against active vLLM endpoint"
 spec:
-  backoffLimit: 1
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 7200
+  backoffLimit: 0
   template:
     metadata:
       labels:
-        app: garak-scan
-        ztp-modernization-factory: "true"
+        app: garak
     spec:
       restartPolicy: Never
       containers:
         - name: garak
           image: python:3.11-slim
-          command:
-            - sh
-            - -c
-            - |
-              set -e
-              echo "Installing garak..."
-              pip install -q garak 2>/dev/null || pip install garak
-              mkdir -p /tmp/garak-results
-
-              echo "Running garak red-team scan against Granite endpoint..."
-              echo "Target: ${GRANITE_URL}"
-
-              python3 -m garak \
-                --model_type openai \
-                --model_name granite-33-8b-instruct \
-                --model_api_base "${GRANITE_URL}" \
-                --probes promptinject.HijackHateHumansMini,encoding.InjectBase64 \
-                --report_prefix /tmp/garak-results/scan \
-                --verbose 2>&1 | tail -1000
-
-              echo ""
-              echo "=== Garak scan completed ==="
-              echo "Results location: /tmp/garak-results/"
-              if [ -f /tmp/garak-results/scan.report.json ]; then
-                echo "Report summary:"
-                cat /tmp/garak-results/scan.report.json | head -100
-              fi
+          command: ["python", "/scripts/run.py"]
           env:
-            - name: GRANITE_URL
-              value: "http://granite-33-8b-instruct-api-my-first-model.apps.ocp.j9nnm.sandbox782.opentlc.com/v1"
+            - name: VLLM_BASE_URL
+              value: "http://qwen3-30b.gemma4.svc.cluster.local:8080"
+            - name: RHOAI_MODEL_NAME
+              value: "qwen3-30b"
+            - name: GARAK_PROBES
+              value: "promptinject.HijackHateHumansMini,dan.Dan_11_0,encoding.InjectBase64"
+            - name: GARAK_GENERATIONS
+              value: "5"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
           resources:
             requests:
-              memory: 512Mi
-              cpu: 250m
+              cpu: "500m"
+              memory: "1Gi"
             limits:
-              memory: 1Gi
-              cpu: 500m
+              cpu: "2"
+              memory: "2Gi"
+      volumes:
+        - name: scripts
+          configMap:
+            name: garak-scan
