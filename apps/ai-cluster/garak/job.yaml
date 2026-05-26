@@ -19,7 +19,7 @@ data:
     endpoint    = os.environ.get("VLLM_BASE_URL", "http://qwen3-30b.gemma4.svc.cluster.local:8080")
     model       = os.environ.get("RHOAI_MODEL_NAME", "qwen3-30b")
     probes      = os.environ.get("GARAK_PROBES",
-                      "promptinject.HijackHateHumansMini,dan.Dan_11_0,encoding.InjectBase64")
+                      "promptinject,dan,encoding")
     generations = os.environ.get("GARAK_GENERATIONS", "5")
 
     print(f"=== ZTP Garak Red-Team Scan ===")
@@ -37,10 +37,10 @@ data:
 
     result = subprocess.run([
         sys.executable, "-m", "garak",
-        "--model_type",  "openai",
-        "--model_name",  model,
-        "--probes",      probes,
-        "--generations", generations,
+        "--target_type",   "openai",
+        "--target_name",   model,
+        "--probes",        probes,
+        "--generations",   generations,
         "--report_prefix", "/tmp/garak",
     ], env=env)
 
@@ -90,12 +90,14 @@ spec:
           image: python:3.11-slim
           command: ["python", "/scripts/run.py"]
           env:
+            - name: HOME
+              value: "/tmp"
             - name: VLLM_BASE_URL
               value: "http://qwen3-30b.gemma4.svc.cluster.local:8080"
             - name: RHOAI_MODEL_NAME
               value: "qwen3-30b"
             - name: GARAK_PROBES
-              value: "promptinject.HijackHateHumansMini,dan.Dan_11_0,encoding.InjectBase64"
+              value: "promptinject,dan,encoding"
             - name: GARAK_GENERATIONS
               value: "5"
           volumeMounts:

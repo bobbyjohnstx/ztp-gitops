@@ -848,7 +848,7 @@ data:
     # ── red_team — Garak LLM red-team scan ──────────────────────────────────
 
     def red_team(probes=None, generations=5):
-        probes = probes or "promptinject.HijackHateHumansMini,dan.Dan_11_0,encoding.InjectBase64"
+        probes = probes or "promptinject,dan,encoding"
         ns  = "conductor-ai"
         k8s = "https://kubernetes.default.svc"
         sa_tok_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
