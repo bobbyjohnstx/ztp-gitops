@@ -1,0 +1,15 @@
+---
+# ServiceMeshMemberRoll — enrolls the migration namespace into the mesh.
+# Add additional userN namespaces here as needed for multi-user demos.
+apiVersion: maistra.io/v1
+kind: ServiceMeshMemberRoll
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  members:
+    - vmimported-user1
+    - vmimported-user2
+    - vmimported-user3
+    - vmimported-user4
+    - vmimported-user5
