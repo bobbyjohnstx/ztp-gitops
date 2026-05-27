@@ -365,7 +365,7 @@ data:
 
     def mtv_manifest_gen(vms, target_namespace="mtv-migrated",
                          network_map=None, storage_map=None,
-                         vsphere_provider="vsphere-source", warm=False, timeout=600):
+                         vsphere_provider="vmware", warm=False, timeout=600):
         if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
             return {"status": "error", "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
 
