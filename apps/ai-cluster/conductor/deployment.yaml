@@ -28,6 +28,12 @@ spec:
             - configMapRef:
                 name: conductor-config
           env:
+            - name: CLUSTER1_API_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cluster1-credentials
+                  key: api_url
+                  optional: true
             - name: CLUSTER1_TOKEN
               valueFrom:
                 secretKeyRef:
