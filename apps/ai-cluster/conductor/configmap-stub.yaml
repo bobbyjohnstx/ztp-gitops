@@ -1376,7 +1376,7 @@ data:
                         target_namespace=body.get("target_namespace", "mtv-migrated"),
                         network_map=body.get("network_map"),
                         storage_map=body.get("storage_map"),
-                        vsphere_provider=body.get("vsphere_provider", "vsphere-source"),
+                        vsphere_provider=body.get("vsphere_provider", "vmware"),
                         warm=body.get("warm", False),
                         timeout=body.get("timeout", 600),
                     )
