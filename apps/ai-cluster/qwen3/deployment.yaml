@@ -8,6 +8,7 @@ metadata:
     ztp-modernization-factory: "true"
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1800
   selector:
     matchLabels:
       app: qwen3-30b
