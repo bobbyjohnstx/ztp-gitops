@@ -439,6 +439,11 @@ data:
                       "vms": plan_vms,
                       "warm": warm}}, tok)
 
+        # Wait for Plan to reach Ready before creating Migration — avoids 400 race condition
+        _k8s_wait(base,
+            f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/plans/{plan_name}",
+            tok, "Ready", timeout=120)
+
         _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/migrations",
             {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "Migration",
              "metadata": {"name": mig_name, "namespace": MTV_NS,
