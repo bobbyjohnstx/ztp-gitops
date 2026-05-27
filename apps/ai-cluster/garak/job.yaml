@@ -16,7 +16,7 @@ data:
     """ZTP Garak red-team — installs garak and scans the active vLLM endpoint."""
     import os, subprocess, sys, glob, json
 
-    endpoint    = os.environ.get("VLLM_BASE_URL", "http://qwen3-30b.gemma4.svc.cluster.local:8080")
+    endpoint    = os.environ.get("VLLM_BASE_URL", "http://qwen3-30b.qwen3.svc.cluster.local:8080")
     model       = os.environ.get("RHOAI_MODEL_NAME", "qwen3-30b")
     probes      = os.environ.get("GARAK_PROBES",
                       "promptinject,dan,encoding")
@@ -93,7 +93,7 @@ spec:
             - name: HOME
               value: "/tmp"
             - name: VLLM_BASE_URL
-              value: "http://qwen3-30b.gemma4.svc.cluster.local:8080"
+              value: "http://qwen3-30b.qwen3.svc.cluster.local:8080"
             - name: RHOAI_MODEL_NAME
               value: "qwen3-30b"
             - name: GARAK_PROBES

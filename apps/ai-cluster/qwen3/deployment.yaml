@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qwen3-30b
-  namespace: gemma4
+  namespace: qwen3
   labels:
     app: qwen3-30b
     ztp-modernization-factory: "true"
@@ -66,7 +66,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: qwen3-30b
-  namespace: gemma4
+  namespace: qwen3
   labels:
     app: qwen3-30b
     ztp-modernization-factory: "true"
@@ -82,7 +82,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: qwen3-30b
-  namespace: gemma4
+  namespace: qwen3
   labels:
     ztp-modernization-factory: "true"
 spec:

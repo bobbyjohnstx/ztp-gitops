@@ -1,6 +1,6 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: gemma4
+  name: qwen3
   labels:
-    kubernetes.io/metadata.name: gemma4
+    kubernetes.io/metadata.name: qwen3
