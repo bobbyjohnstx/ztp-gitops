@@ -506,30 +506,55 @@ data:
                 "detail": f"PipelineRun did not complete within {timeout}s"}
 
     def pipeline_trigger(vms, pipeline_name="ztp-vm-migration",
-                         track="2", target_namespace="ztp-factory", timeout=300):
+                         track="2", target_namespace="ztp-factory", timeout=300,
+                         image_registry="quay.io/ztp-factory/coolstore-quarkus",
+                         legacy_service="coolstore-jboss"):
         if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
             return {"status": "error",
                     "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
         base = CLUSTER1_API_URL
         tok  = CLUSTER1_TOKEN
-        vm_names = ",".join(v.get("name", "") for v in vms)
         run_name = f"ztp-run-{int(time.time())}"
 
-        _k8s_create(base,
-            f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelines",
-            _DEMO_PIPELINE_SPEC, tok)
-
-        _k8s_create(base,
-            f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns",
-            {"apiVersion": "tekton.dev/v1", "kind": "PipelineRun",
-             "metadata": {"name": run_name, "namespace": TEKTON_NS,
-                          "labels": {"ztp-modernization-factory": "true"}},
-             "spec": {"pipelineRef": {"name": pipeline_name},
-                      "params": [
-                          {"name": "vm-names", "value": vm_names},
-                          {"name": "track", "value": str(track)},
-                          {"name": "target-namespace", "value": target_namespace},
-                      ]}}, tok)
+        if str(track) == "3":
+            pipeline_name = "ztp-coolstore-modernize"
+            _k8s_create(base,
+                f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns",
+                {"apiVersion": "tekton.dev/v1", "kind": "PipelineRun",
+                 "metadata": {"name": run_name, "namespace": TEKTON_NS,
+                              "labels": {"ztp-modernization-factory": "true",
+                                         "ztp.factory/track": "3"}},
+                 "spec": {
+                     "pipelineRef": {"name": pipeline_name},
+                     "params": [
+                         {"name": "target-namespace", "value": target_namespace},
+                         {"name": "image-registry",   "value": image_registry},
+                         {"name": "legacy-service",   "value": legacy_service},
+                     ],
+                     "workspaces": [
+                         {"name": "shared-workspace",
+                          "volumeClaimTemplate": {
+                              "spec": {
+                                  "accessModes": ["ReadWriteOnce"],
+                                  "resources": {"requests": {"storage": "1Gi"}}}}}
+                     ],
+                 }}, tok)
+        else:
+            vm_names = ",".join(v.get("name", "") for v in vms)
+            _k8s_create(base,
+                f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelines",
+                _DEMO_PIPELINE_SPEC, tok)
+            _k8s_create(base,
+                f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns",
+                {"apiVersion": "tekton.dev/v1", "kind": "PipelineRun",
+                 "metadata": {"name": run_name, "namespace": TEKTON_NS,
+                              "labels": {"ztp-modernization-factory": "true"}},
+                 "spec": {"pipelineRef": {"name": pipeline_name},
+                          "params": [
+                              {"name": "vm-names", "value": vm_names},
+                              {"name": "track", "value": str(track)},
+                              {"name": "target-namespace", "value": target_namespace},
+                          ]}}, tok)
 
         result = _k8s_poll_pipelinerun(
             base,
@@ -994,7 +1019,8 @@ data:
                  "track": 1, "reason": "fallback"} for v in vms]}
 
         track_1 = [c for c in classified.get("classifications", []) if c.get("track") == 1]
-        track_23 = [c for c in classified.get("classifications", []) if c.get("track") in (2, 3)]
+        track_2 = [c for c in classified.get("classifications", []) if c.get("track") == 2]
+        track_3 = [c for c in classified.get("classifications", []) if c.get("track") == 3]
 
         if track_1:
             t1_vms = [{"id": c["vm_id"], "name": c["vm_name"]} for c in track_1]
@@ -1007,18 +1033,27 @@ data:
             except Exception as e:
                 steps["track_1"] = {"status": "error", "error": str(e)}
 
-        if track_23:
-            t23_vms = [{"id": c.get("vm_id", ""), "name": c["vm_name"]} for c in track_23]
-            tracks = {c["vm_name"]: c.get("track", 2) for c in track_23}
+        if track_2:
+            t2_vms = [{"id": c.get("vm_id", ""), "name": c["vm_name"]} for c in track_2]
             try:
-                t23_result = pipeline_trigger(
-                    t23_vms, track=str(track_23[0].get("track", 2)),
-                    target_namespace=target_ns, timeout=timeout)
-                steps["track_2_3"] = {"status": t23_result.get("status"),
-                                      "run": t23_result.get("pipeline_run_name"),
-                                      "vms": [c["vm_name"] for c in track_23]}
+                t2_result = pipeline_trigger(t2_vms, track="2",
+                                             target_namespace=target_ns, timeout=timeout)
+                steps["track_2"] = {"status": t2_result.get("status"),
+                                    "run": t2_result.get("pipeline_run_name"),
+                                    "vms": [c["vm_name"] for c in track_2]}
             except Exception as e:
-                steps["track_2_3"] = {"status": "error", "error": str(e)}
+                steps["track_2"] = {"status": "error", "error": str(e)}
+
+        if track_3:
+            t3_vms = [{"id": c.get("vm_id", ""), "name": c["vm_name"]} for c in track_3]
+            try:
+                t3_result = pipeline_trigger(t3_vms, track="3",
+                                             target_namespace=target_ns, timeout=timeout)
+                steps["track_3"] = {"status": t3_result.get("status"),
+                                    "run": t3_result.get("pipeline_run_name"),
+                                    "vms": [c["vm_name"] for c in track_3]}
+            except Exception as e:
+                steps["track_3"] = {"status": "error", "error": str(e)}
 
         all_ok = all(s.get("status") in ("ok", "Timeout", "Succeeded")
                      for s in steps.values())
@@ -1355,13 +1390,15 @@ data:
                     self._reply(400, {"error": "vms array required"})
                     return
                 try:
-                    inputs = {"vm_count": len(vms), "track": body.get("track", "2")}
+                    track = body.get("track", "2")
+                    inputs = {"vm_count": len(vms), "track": track}
                     result = _trace_skill("pipeline_trigger", inputs,
                         pipeline_trigger, vms,
-                        pipeline_name=body.get("pipeline_name", "ztp-vm-migration"),
-                        track=body.get("track", "2"),
+                        track=track,
                         target_namespace=body.get("target_namespace", "ztp-factory"),
-                        timeout=body.get("timeout", 300))
+                        timeout=body.get("timeout", 300),
+                        image_registry=body.get("image_registry", "quay.io/ztp-factory/coolstore-quarkus"),
+                        legacy_service=body.get("legacy_service", "coolstore-jboss"))
                     self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
