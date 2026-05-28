@@ -471,9 +471,10 @@ data:
                       "warm": warm}}, tok)
 
         # Wait for Plan to reach Ready before creating Migration — avoids 400 race condition
+        # VDDK init image validation can take 5-10 min on first pull; use 600s timeout
         _k8s_wait(base,
             f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/plans/{plan_name}",
-            tok, "Ready", timeout=120)
+            tok, "Ready", timeout=600)
 
         _k8s_create(base, f"/apis/forklift.konveyor.io/v1beta1/namespaces/{MTV_NS}/migrations",
             {"apiVersion": "forklift.konveyor.io/v1beta1", "kind": "Migration",
