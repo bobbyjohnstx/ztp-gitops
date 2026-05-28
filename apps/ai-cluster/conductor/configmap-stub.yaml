@@ -424,7 +424,7 @@ data:
             "destination": {"name": dest,             "namespace": MTV_NS},
         }
 
-        nm_dest = {"type": network_map.get("destination_type", "Pod")}
+        nm_dest = {"type": network_map.get("destination_type", "pod")}
         if network_map.get("destination_name"):
             nm_dest["name"] = network_map["destination_name"]
 
