@@ -61,6 +61,10 @@ data:
     LANGFUSE_URL         = os.environ.get("LANGFUSE_URL", "").rstrip("/")
     LANGFUSE_PK          = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
     LANGFUSE_SK          = os.environ.get("LANGFUSE_SECRET_KEY", "")
+    MAAS_BASE_URL        = os.environ.get("MAAS_BASE_URL", "").rstrip("/")
+    MAAS_API_KEY         = os.environ.get("MAAS_API_KEY", "")
+    MAAS_QUARKUS_MODEL   = os.environ.get("MAAS_QUARKUS_MODEL", "llama-scout-17b")
+    MAAS_JUDGE_MODEL     = os.environ.get("MAAS_JUDGE_MODEL", "deepseek-r1-distill-qwen-14b")
 
 
     # ── Input sanitization ─────────────────────────────────────────────────
@@ -512,8 +516,10 @@ data:
 
     def pipeline_trigger(vms, pipeline_name="ztp-vm-migration",
                          track="2", target_namespace="ztp-factory", timeout=300,
-                         image_registry="quay.io/ztp-factory/coolstore-quarkus",
-                         legacy_service="coolstore-jboss"):
+                         image_registry="image-registry.openshift-image-registry.svc:5000/ztp-factory/coolstore-quarkus",
+                         legacy_service="coolstore-jboss",
+                         migration_name="user1-migration-run-1",
+                         source_repo="https://github.com/quarkusio/quarkus-super-heroes"):
         if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
             return {"status": "error",
                     "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
@@ -540,26 +546,55 @@ data:
                          {"name": "shared-workspace",
                           "volumeClaimTemplate": {
                               "spec": {
-                                  "accessModes": ["ReadWriteOnce"],
-                                  "resources": {"requests": {"storage": "1Gi"}}}}}
+                                  "storageClassName": "ocs-external-storagecluster-cephfs",
+                                  "accessModes": ["ReadWriteMany"],
+                                  "resources": {"requests": {"storage": "2Gi"}}}}}
                      ],
                  }}, tok)
-        else:
-            vm_names = ",".join(v.get("name", "") for v in vms)
-            _k8s_create(base,
-                f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelines",
-                _DEMO_PIPELINE_SPEC, tok)
+        elif str(track) == "1":
+            pipeline_name = "ztp-mtv-governance"
             _k8s_create(base,
                 f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns",
                 {"apiVersion": "tekton.dev/v1", "kind": "PipelineRun",
                  "metadata": {"name": run_name, "namespace": TEKTON_NS,
-                              "labels": {"ztp-modernization-factory": "true"}},
-                 "spec": {"pipelineRef": {"name": pipeline_name},
-                          "params": [
-                              {"name": "vm-names", "value": vm_names},
-                              {"name": "track", "value": str(track)},
-                              {"name": "target-namespace", "value": target_namespace},
-                          ]}}, tok)
+                              "labels": {"ztp-modernization-factory": "true",
+                                         "ztp.factory/track": "1"}},
+                 "spec": {
+                     "pipelineRef": {"name": pipeline_name},
+                     "params": [
+                         {"name": "migration-name",    "value": migration_name},
+                         {"name": "target-namespace",  "value": target_namespace},
+                     ],
+                 }}, tok)
+        else:
+            # Track 2 — Replatform: git-clone → maven-build → buildah-push → oc-apply
+            pipeline_name = "ztp-s2i-replatform"
+            app_name = vms[0].get("name", "rest-heroes") if vms else "rest-heroes"
+            img_name = f"image-registry.openshift-image-registry.svc:5000/{TEKTON_NS}/{app_name}:latest"
+            _k8s_create(base,
+                f"/apis/tekton.dev/v1/namespaces/{TEKTON_NS}/pipelineruns",
+                {"apiVersion": "tekton.dev/v1", "kind": "PipelineRun",
+                 "metadata": {"name": run_name, "namespace": TEKTON_NS,
+                              "labels": {"ztp-modernization-factory": "true",
+                                         "ztp.factory/track": "2"}},
+                 "spec": {
+                     "pipelineRef": {"name": pipeline_name},
+                     "params": [
+                         {"name": "source-repo",       "value": source_repo},
+                         {"name": "app-name",          "value": app_name},
+                         {"name": "image-name",        "value": img_name},
+                         {"name": "target-namespace",  "value": target_namespace},
+                         {"name": "maven-module",      "value": "rest-heroes"},
+                     ],
+                     "workspaces": [
+                         {"name": "shared-workspace",
+                          "volumeClaimTemplate": {
+                              "spec": {
+                                  "storageClassName": "ocs-external-storagecluster-cephfs",
+                                  "accessModes": ["ReadWriteMany"],
+                                  "resources": {"requests": {"storage": "2Gi"}}}}}
+                     ],
+                 }}, tok)
 
         result = _k8s_poll_pipelinerun(
             base,
@@ -1035,6 +1070,15 @@ data:
                 steps["track_1"] = {"status": t1_result.get("status"),
                                     "plan": t1_result.get("plan_name"),
                                     "vms": [c["vm_name"] for c in track_1]}
+                try:
+                    mig_name = t1_result.get("migration_name", "user1-migration-run-1")
+                    gov = pipeline_trigger(t1_vms, track="1",
+                                          target_namespace=target_ns,
+                                          migration_name=mig_name, timeout=timeout)
+                    steps["track_1_governance"] = {"status": gov.get("status"),
+                                                   "run": gov.get("pipeline_run_name")}
+                except Exception as eg:
+                    steps["track_1_governance"] = {"status": "warning", "error": str(eg)}
             except Exception as e:
                 steps["track_1"] = {"status": "error", "error": str(e)}
 

@@ -1,0 +1,92 @@
+---
+# JBoss EAP 7.4 legacy "before" deployment for Track 3 canary demo.
+# This is a regular OCP Deployment (NOT a KubeVirt VM) so Istio sidecar
+# injection works correctly. KubeVirt virt-launcher pods cannot receive
+# Envoy sidecars, which would break VirtualService traffic management.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coolstore-jboss
+  namespace: vmimported-user1
+  labels:
+    app: coolstore
+    version: jboss
+    ztp.factory/track: "3"
+    ztp.factory/role: legacy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coolstore
+      version: jboss
+  template:
+    metadata:
+      labels:
+        app: coolstore
+        version: jboss
+      annotations:
+        sidecar.istio.io/inject: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /health
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: coolstore-jboss
+          image: quay.io/redhat-gpte/coolstore-jboss-eap:7.4
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coolstore-jboss
+  namespace: vmimported-user1
+  labels:
+    app: coolstore
+    version: jboss
+spec:
+  selector:
+    app: coolstore
+    version: jboss
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: coolstore-jboss
+  namespace: vmimported-user1
+  labels:
+    app: coolstore
+    version: jboss
+spec:
+  to:
+    kind: Service
+    name: coolstore-jboss
+  port:
+    targetPort: http
+  tls:
+    termination: edge

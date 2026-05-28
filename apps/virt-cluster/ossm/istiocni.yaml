@@ -1,0 +1,12 @@
+---
+# OSSM 3.2 IstioCNI — deploys the Istio CNI plugin (replaces init containers).
+# Required for Track 3 traffic shadowing and canary shift.
+# API: sailoperator.io/v1 (NOT maistra.io — that is OSSM 2)
+apiVersion: sailoperator.io/v1
+kind: IstioCNI
+metadata:
+  name: default
+  namespace: istio-cni
+spec:
+  version: v1.24
+  namespace: istio-cni
