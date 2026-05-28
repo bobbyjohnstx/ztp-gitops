@@ -97,6 +97,25 @@ data:
             return json.loads(raw) if raw else None
 
 
+    def _maas_chat(messages, model=None, max_tokens=2048, temperature=0.1):
+        """Call Red Hat MaaS LiteLLM (OpenAI-compatible) for models too large for local GPU.
+        Used for Track 3 Quarkus code generation (llama-scout-17b) and EvalOps judging.
+        Returns content string or None on failure."""
+        if not MAAS_BASE_URL or not MAAS_API_KEY:
+            return None
+        try:
+            resp = _json_req(
+                MAAS_BASE_URL + "/v1/chat/completions",
+                {"model": model or MAAS_QUARKUS_MODEL,
+                 "messages": messages,
+                 "max_tokens": max_tokens,
+                 "temperature": temperature},
+                headers={"Authorization": f"Bearer {MAAS_API_KEY}"})
+            return resp["choices"][0]["message"]["content"]
+        except Exception:
+            return None
+
+
     # ── vSphere REST helpers ──────────────────────────────────────────────────
 
     def _vs_req(base, path, method="GET", token=None, user=None, pwd=None):
