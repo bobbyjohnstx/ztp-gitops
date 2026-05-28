@@ -236,20 +236,28 @@ data:
             '[{"name": "vm-name", "track": 1, "reason": "one sentence"}]'
         )
 
-        resp = _json_req(
-            granite_url.rstrip("/") + "/v1/chat/completions",
-            payload={
-                "model":       GRANITE_MODEL,
-                "messages":    [
-                    {"role": "system", "content": ZTP_SYSTEM_PROMPT},
-                    {"role": "user",   "content": prompt},
-                ],
-                "temperature": 0.1,
-                "max_tokens":  512,
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-        )
-        content = resp["choices"][0]["message"]["content"].strip()
+        if not granite_url:
+            # Single-cluster mode: fall back to MaaS for LLM classification
+            content = _maas_chat(
+                [{"role": "system", "content": ZTP_SYSTEM_PROMPT},
+                 {"role": "user",   "content": prompt}],
+                model=MAAS_QUARKUS_MODEL, max_tokens=512, temperature=0.1,
+            ) or ""
+        else:
+            resp = _json_req(
+                granite_url.rstrip("/") + "/v1/chat/completions",
+                payload={
+                    "model":       GRANITE_MODEL,
+                    "messages":    [
+                        {"role": "system", "content": ZTP_SYSTEM_PROMPT},
+                        {"role": "user",   "content": prompt},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens":  512,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+            )
+            content = resp["choices"][0]["message"]["content"].strip()
         # Extract JSON array from response (model may add prose)
         m = re.search(r'\[.*\]', content, re.DOTALL)
         if m:

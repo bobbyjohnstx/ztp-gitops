@@ -8,5 +8,5 @@ metadata:
   name: default
   namespace: istio-cni
 spec:
-  version: v1.24
+  version: v1.27-latest
   namespace: istio-cni
