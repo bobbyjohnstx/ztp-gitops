@@ -373,9 +373,13 @@ data:
         while time.time() < deadline:
             try:
                 resp = _k8s_req(base + path, token)
-                for cond in resp.get("status", {}).get("conditions", []):
-                    if cond.get("type") == condition_type and cond.get("status") == "True":
-                        return True
+                conds = {c.get("type"): c.get("status")
+                         for c in resp.get("status", {}).get("conditions", [])}
+                if conds.get(condition_type) == "True":
+                    return True
+                # VMAlreadyExists means target VMs are present — treat Plan as Ready
+                if condition_type == "Ready" and conds.get("VMAlreadyExists") == "True":
+                    return True
             except Exception:
                 pass
             time.sleep(5)
@@ -428,7 +432,7 @@ data:
 
     # ── skill_mtv_manifest_gen ────────────────────────────────────────────────
 
-    def mtv_manifest_gen(vms, target_namespace="mtv-migrated",
+    def mtv_manifest_gen(vms, target_namespace="vmimported-user1",
                          network_map=None, storage_map=None,
                          vsphere_provider="vmware", warm=False, timeout=600):
         if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
@@ -1104,9 +1108,9 @@ data:
     def migrate(vs_url, vs_user, vs_pass, options=None):
         import uuid
         opts = options or {}
-        target_ns = opts.get("target_namespace", "mtv-migrated")
+        target_ns = opts.get("target_namespace", "vmimported-user1")
         granite = opts.get("granite_url", GRANITE_URL)
-        timeout = opts.get("timeout", 60)
+        timeout = opts.get("timeout", 600)
         steps = {}
 
         try:
@@ -1427,7 +1431,8 @@ data:
 
         def do_GET(self):
             if self.path.startswith("/q/health") or \
-               self.path.startswith("/api/v1/cluster1/health"):
+               self.path.startswith("/api/v1/cluster1/health") or \
+               self.path == "/health":
                 components = {}
                 for name, url in [("llm", GRANITE_URL or MAAS_BASE_URL),
                                    ("langfuse", LANGFUSE_URL),
