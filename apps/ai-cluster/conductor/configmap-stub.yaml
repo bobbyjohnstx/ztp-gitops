@@ -598,7 +598,8 @@ data:
                          image_registry="image-registry.openshift-image-registry.svc:5000/ztp-factory/coolstore-quarkus",
                          legacy_service="coolstore-jboss",
                          migration_name="user1-migration-run-1",
-                         source_repo="https://github.com/quarkusio/quarkus-super-heroes"):
+                         source_repo="https://github.com/bobbyjohnstx/coolstore-modernized",
+                         quarkus_context_dir="review-service-quarkus"):
         if not CLUSTER1_API_URL or not CLUSTER1_TOKEN:
             return {"status": "error",
                     "error": "CLUSTER1_API_URL / CLUSTER1_TOKEN not configured"}
@@ -617,9 +618,11 @@ data:
                  "spec": {
                      "pipelineRef": {"name": pipeline_name},
                      "params": [
-                         {"name": "target-namespace", "value": target_namespace},
-                         {"name": "image-registry",   "value": image_registry},
-                         {"name": "legacy-service",   "value": legacy_service},
+                         {"name": "target-namespace",      "value": target_namespace},
+                         {"name": "image-registry",        "value": image_registry},
+                         {"name": "legacy-service",        "value": legacy_service},
+                         {"name": "source-repo",           "value": source_repo},
+                         {"name": "quarkus-context-dir",   "value": quarkus_context_dir},
                      ],
                      "workspaces": [
                          {"name": "shared-workspace",
@@ -1578,7 +1581,9 @@ data:
                         target_namespace=body.get("target_namespace", "ztp-factory"),
                         timeout=body.get("timeout", 300),
                         image_registry=body.get("image_registry", "quay.io/ztp-factory/coolstore-quarkus"),
-                        legacy_service=body.get("legacy_service", "coolstore-jboss"))
+                        legacy_service=body.get("legacy_service", "coolstore-jboss"),
+                        source_repo=body.get("source_repo", "https://github.com/bobbyjohnstx/coolstore-modernized"),
+                        quarkus_context_dir=body.get("quarkus_context_dir", "review-service-quarkus"))
                     self._ok(result)
                 except Exception as e:
                     self._reply(500, {"error": str(e)})
