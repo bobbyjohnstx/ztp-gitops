@@ -32,7 +32,7 @@ spec:
     spec:
       containers:
         - name: coolstore-jboss
-          image: registry.access.redhat.com/jboss-eap-7/eap74-openjdk11-openshift-rhel8:latest
+          image: registry.redhat.io/jboss-eap-7/eap74-openjdk11-openshift-rhel8:latest
           ports:
             - containerPort: 8080
               name: http
